@@ -4,6 +4,7 @@ import "dotenv/config";
 const EnvSchema = z.object({
   PIPEDRIVE_API_TOKEN: z.string().min(1, "Pipedrive API token is required"),
   PIPEDRIVE_USER_ID: z.string().min(1, "Pipedrive user ID is required").transform(Number),
+  PIPEDRIVE_DOMAIN: z.string().min(1, "Pipedrive company domain is required (e.g. 'mycompany' from mycompany.pipedrive.com)"),
   ANTHROPIC_API_KEY: z.string().min(1, "Anthropic API key is required"),
   GMAIL_CREDENTIALS_PATH: z.string().default("./credentials.json"),
   GMAIL_TOKEN_PATH: z.string().default("./token.json"),

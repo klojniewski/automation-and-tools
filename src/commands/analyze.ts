@@ -167,37 +167,56 @@ ${emailSummary}
   const analysis = await analyzeDeals(dealContexts.join("\n\n"));
 
   // 6. Output prioritized results
+  const pipedriveUrl = `https://${env.PIPEDRIVE_DOMAIN}.pipedrive.com/deal`;
+
   console.log("\n========================================");
   console.log("         DEAL PRIORITIES");
   console.log("========================================\n");
 
   const sorted = analysis.deals.sort((a, b) => a.priority_rank - b.priority_rank);
 
-  for (const deal of sorted) {
-    const healthIcon: Record<string, string> = {
-      hot: "!!!",
-      warm: "!! ",
-      cold: "!  ",
-      at_risk: "!!!",
-    };
-    const urgencyLabel: Record<string, string> = {
-      immediate: "NOW",
-      this_week: "THIS WEEK",
-      next_week: "NEXT WEEK",
-      no_rush: "LOW",
-    };
+  const healthIcon: Record<string, string> = {
+    hot: "!!!",
+    warm: "!! ",
+    cold: "!  ",
+    at_risk: "!!!",
+  };
+  const urgencyLabel: Record<string, string> = {
+    immediate: "NOW",
+    this_week: "THIS WEEK",
+    next_week: "NEXT WEEK",
+    no_rush: "LOW",
+  };
 
-    console.log(
-      `#${deal.priority_rank} [${healthIcon[deal.deal_health] ?? "   "}] ${deal.deal_title}`,
-    );
-    console.log(
-      `   Health: ${deal.deal_health.toUpperCase()} | Urgency: ${urgencyLabel[deal.urgency] ?? deal.urgency}`,
-    );
-    console.log(`   Action: ${deal.recommended_action}`);
-    console.log(`   Why: ${deal.reasoning}`);
-    if (deal.key_signals.length > 0) {
-      console.log(`   Signals: ${deal.key_signals.join(", ")}`);
+  for (const deal of sorted) {
+    console.log(`#${deal.priority_rank} [${healthIcon[deal.deal_health] ?? "   "}] ${deal.deal_title}`);
+    console.log(`URL: ${pipedriveUrl}/${deal.deal_id}`);
+    console.log(`Health: ${deal.deal_health.toUpperCase()} | Urgency: ${urgencyLabel[deal.urgency] ?? deal.urgency}`);
+
+    console.log("\nAction:");
+    for (const action of deal.recommended_actions) {
+      console.log(`  - ${action}`);
     }
-    console.log();
+
+    console.log("\nWhy:");
+    for (const reason of deal.reasoning) {
+      console.log(`  - ${reason}`);
+    }
+
+    if (deal.key_signals.length > 0) {
+      console.log("\nSignals:");
+      for (const signal of deal.key_signals) {
+        console.log(`  - ${signal}`);
+      }
+    }
+
+    if (deal.deal_history.length > 0) {
+      console.log("\nDeal History:");
+      for (const entry of deal.deal_history) {
+        console.log(`  - ${entry.date}: ${entry.summary}`);
+      }
+    }
+
+    console.log("\n----------------------------------------\n");
   }
 }
