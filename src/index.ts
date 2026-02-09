@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { runAnalysis } from "./commands/analyze.js";
+import { runGetGA4Stats } from "./commands/marketing/getga4stats.js";
 
 const program = new Command();
 
@@ -23,6 +24,29 @@ program
         limit: parseInt(opts.limit),
         emailDays: parseInt(opts.emailDays),
         maxEmails: parseInt(opts.maxEmails),
+        dryRun: opts.dryRun ?? false,
+        verbose: opts.verbose ?? false,
+      });
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+const marketing = program
+  .command("marketing")
+  .description("Marketing analytics commands");
+
+marketing
+  .command("getga4stats")
+  .description("Fetch weekly GA4 metrics and append to Google Sheet")
+  .option("-w, --week <YYWW>", "Year+week, e.g. 2601 (default: last completed week)")
+  .option("--dry-run", "Show metrics without writing to Sheet")
+  .option("-v, --verbose", "Print extra debug info")
+  .action(async (opts) => {
+    try {
+      await runGetGA4Stats({
+        week: opts.week,
         dryRun: opts.dryRun ?? false,
         verbose: opts.verbose ?? false,
       });

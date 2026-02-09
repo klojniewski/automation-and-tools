@@ -8,6 +8,11 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1, "Anthropic API key is required"),
   GMAIL_CREDENTIALS_PATH: z.string().default("./credentials.json"),
   GMAIL_TOKEN_PATH: z.string().default("./token.json"),
+
+  // GA4 + Sheets (optional — only needed for `marketing` commands)
+  GA4_PROPERTY_ID: z.string().default(""),
+  GOOGLE_SHEETS_ID: z.string().default(""),
+  GOOGLE_SHEETS_TAB: z.string().default("Sheet1"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
