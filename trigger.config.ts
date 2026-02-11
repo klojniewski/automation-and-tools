@@ -1,7 +1,8 @@
 import { defineConfig } from "@trigger.dev/sdk/v3";
+import "dotenv/config";
 
 export default defineConfig({
-  project: "proj_placeholder", // Replace with your Trigger.dev project ref
+  project: process.env.TRIGGER_PROJECT_REF!,
   dirs: ["./src/trigger"],
   maxDuration: 300,
   build: {
