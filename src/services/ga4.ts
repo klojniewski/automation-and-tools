@@ -6,6 +6,7 @@ import {
   HOMEPAGE_PATH,
   AI_SOURCES,
   PAID_CHANNEL_GROUPS,
+  EXCLUDED_LANDING_PAGES,
 } from "../config/marketing.js";
 
 type RunReportRequest =
@@ -23,6 +24,10 @@ export interface GA4Metrics {
   direct: number;
   aiTraffic: number;
   engagementRate: number;
+  engagementRateOrganic: number;
+  qualityTraffic: number;
+  blogTraffic: number;
+  paidTraffic: number;
 }
 
 // ── Filter helpers ──────────────────────────────────────────
@@ -96,6 +101,38 @@ function blogPageFilter(): FilterExpression {
   return pagePathContains("/blog");
 }
 
+function landingPageContains(value: string): FilterExpression {
+  return {
+    filter: {
+      fieldName: "landingPagePlusQueryString",
+      stringFilter: { matchType: "CONTAINS", value },
+    },
+  };
+}
+
+function landingPageExact(value: string): FilterExpression {
+  return {
+    filter: {
+      fieldName: "landingPagePlusQueryString",
+      stringFilter: { matchType: "EXACT", value },
+    },
+  };
+}
+
+/** Exclude sessions with landing pages matching EXCLUDED_LANDING_PAGES or "(not set)". */
+function qualityTrafficFilter(): FilterExpression {
+  return {
+    andGroup: {
+      expressions: [
+        ...EXCLUDED_LANDING_PAGES.map((path) => ({
+          notExpression: landingPageContains(path),
+        })),
+        { notExpression: landingPageExact("(not set)") },
+      ],
+    },
+  };
+}
+
 // ── Report builders ─────────────────────────────────────────
 
 function baseReport(
@@ -105,7 +142,7 @@ function baseReport(
 ): RunReportRequest {
   return {
     dateRanges: [{ startDate, endDate }],
-    metrics: [{ name: "totalUsers" }],
+    metrics: [{ name: "sessions" }],
     ...(dimensionFilter ? { dimensionFilter } : {}),
   };
 }
@@ -131,25 +168,28 @@ export async function fetchGA4Metrics(
         // 0: Total Traffic (no filter)
         baseReport(startDate, endDate),
 
-        // 1: Traffic (-ADS -Blog) — exclude paid channels AND /blog pages
-        baseReport(startDate, endDate, {
-          andGroup: {
-            expressions: [notPaidChannel(), { notExpression: blogPageFilter() }],
-          },
-        }),
-
-        // 2: Total BOFU Traffic
+        // 1: Total BOFU Traffic
         baseReport(startDate, endDate, bofuFilter()),
 
-        // 3: Not Paid BOFU Traffic
+        // 2: Not Paid BOFU Traffic
         baseReport(startDate, endDate, {
           andGroup: {
             expressions: [bofuFilter(), notPaidChannel()],
           },
         }),
 
-        // 4: Organic Traffic
-        baseReport(startDate, endDate, channelEquals("Organic Search")),
+        // 3: Organic Traffic (Search + Social)
+        baseReport(startDate, endDate, channelIn(["Organic Search", "Organic Social"])),
+
+        // 4: Quality Traffic — organic only, exclude blog, career, about, case-studies, ebook, not set
+        baseReport(startDate, endDate, {
+          andGroup: {
+            expressions: [
+              channelIn(["Organic Search", "Organic Social"]),
+              ...qualityTrafficFilter().andGroup!.expressions!,
+            ],
+          },
+        }),
       ],
     },
   });
@@ -181,12 +221,41 @@ export async function fetchGA4Metrics(
           dateRanges: [{ startDate, endDate }],
           metrics: [{ name: "engagementRate" }],
         },
+
+        // 4: Engagement Rate — Organic Search only
+        {
+          dateRanges: [{ startDate, endDate }],
+          metrics: [{ name: "engagementRate" }],
+          dimensionFilter: channelEquals("Organic Search"),
+        },
+      ],
+    },
+  });
+
+  // ── Batch 3 ──
+  const batch3 = await analytics.properties.batchRunReports({
+    property,
+    requestBody: {
+      requests: [
+        // 0: Blog Traffic — Organic channels, landing page contains /blog/
+        baseReport(startDate, endDate, {
+          andGroup: {
+            expressions: [
+              landingPageContains("/blog/"),
+              channelIn(["Organic Search", "Organic Video", "Organic Social", "Organic Shopping"]),
+            ],
+          },
+        }),
+
+        // 1: Paid Traffic
+        baseReport(startDate, endDate, paidChannelFilter()),
       ],
     },
   });
 
   const r1 = batch1.data.reports ?? [];
   const r2 = batch2.data.reports ?? [];
+  const r3 = batch3.data.reports ?? [];
 
   const val = (reports: typeof r1, idx: number): number => {
     const rows = reports[idx]?.rows;
@@ -194,17 +263,27 @@ export async function fetchGA4Metrics(
     return parseInt(rows[0].metricValues?.[0]?.value ?? "0", 10);
   };
 
+  const referral = val(r2, 0);
+  const direct = val(r2, 1);
+  const qualityTraffic = val(r1, 4);
+
   return {
     totalTraffic: val(r1, 0),
-    trafficMinusAdsMinusBlog: val(r1, 1),
-    totalBofu: val(r1, 2),
-    notPaidBofu: val(r1, 3),
-    organic: val(r1, 4),
-    referral: val(r2, 0),
-    direct: val(r2, 1),
+    trafficMinusAdsMinusBlog: qualityTraffic + referral + direct,
+    totalBofu: val(r1, 1),
+    notPaidBofu: val(r1, 2),
+    organic: val(r1, 3),
+    referral,
+    direct,
     aiTraffic: val(r2, 2),
     engagementRate: parseFloat(
       r2[3]?.rows?.[0]?.metricValues?.[0]?.value ?? "0",
     ),
+    engagementRateOrganic: parseFloat(
+      r2[4]?.rows?.[0]?.metricValues?.[0]?.value ?? "0",
+    ),
+    qualityTraffic,
+    blogTraffic: val(r3, 0),
+    paidTraffic: val(r3, 1),
   };
 }

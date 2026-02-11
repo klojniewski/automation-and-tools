@@ -1,6 +1,6 @@
 import { fetchGA4Metrics, type GA4Metrics } from "../../services/ga4.js";
-import { appendRow, getColumnAValues } from "../../services/sheets.js";
-import { METRIC_LABELS } from "../../config/marketing.js";
+import { findRowByWeek, updateMappedCells } from "../../services/sheets.js";
+import { METRIC_LABELS, METRIC_COLUMN_MAP } from "../../config/marketing.js";
 
 export interface GetGA4StatsOptions {
   week?: string;
@@ -81,19 +81,26 @@ function lastWeekRange(): { startDate: string; endDate: string; weekEnding: stri
   };
 }
 
-function metricsToRow(weekEnding: string, m: GA4Metrics): (string | number)[] {
-  return [
-    weekEnding,
-    m.totalTraffic,
-    m.trafficMinusAdsMinusBlog,
-    m.totalBofu,
-    m.notPaidBofu,
-    m.organic,
-    m.referral,
-    m.direct,
-    m.aiTraffic,
-    `${(m.engagementRate * 100).toFixed(2)}%`,
-  ];
+function weekLabel(weekNum: number): string {
+  return `W${weekNum}`;
+}
+
+function metricsToRecord(m: GA4Metrics): Record<string, string | number> {
+  return {
+    totalTraffic: m.totalTraffic,
+    trafficMinusAdsMinusBlog: m.trafficMinusAdsMinusBlog,
+    totalBofu: m.totalBofu,
+    notPaidBofu: m.notPaidBofu,
+    organic: m.organic,
+    referral: m.referral,
+    direct: m.direct,
+    aiTraffic: m.aiTraffic,
+    engagementRate: `${(m.engagementRate * 100).toFixed(2)}%`,
+    engagementRateOrganic: `${(m.engagementRateOrganic * 100).toFixed(2)}%`,
+    qualityTraffic: m.qualityTraffic,
+    blogTraffic: m.blogTraffic,
+    paidTraffic: m.paidTraffic,
+  };
 }
 
 function printMetrics(startDate: string, weekEnding: string, m: GA4Metrics): void {
@@ -107,6 +114,10 @@ function printMetrics(startDate: string, weekEnding: string, m: GA4Metrics): voi
     m.direct,
     m.aiTraffic,
     `${(m.engagementRate * 100).toFixed(2)}%`,
+    `${(m.engagementRateOrganic * 100).toFixed(2)}%`,
+    m.qualityTraffic,
+    m.blogTraffic,
+    m.paidTraffic,
   ];
 
   console.log(`\nWeek: ${startDate} – ${weekEnding}\n`);
@@ -117,9 +128,31 @@ function printMetrics(startDate: string, weekEnding: string, m: GA4Metrics): voi
 }
 
 export async function runGetGA4Stats(options: GetGA4StatsOptions): Promise<void> {
-  const { startDate, endDate, weekEnding } = options.week
-    ? (() => { const { year, weekNum } = parseWeek(options.week); return weekRange(year, weekNum); })()
-    : lastWeekRange();
+  let startDate: string, endDate: string, weekEnding: string;
+  let weekNum: number;
+
+  if (options.week) {
+    const parsed = parseWeek(options.week);
+    weekNum = parsed.weekNum;
+    const range = weekRange(parsed.year, parsed.weekNum);
+    startDate = range.startDate;
+    endDate = range.endDate;
+    weekEnding = range.weekEnding;
+  } else {
+    const range = lastWeekRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
+    weekEnding = range.weekEnding;
+    // Derive week number from the ending date
+    const endDateObj = new Date(range.endDate + "T00:00:00");
+    const year = endDateObj.getFullYear();
+    const jan1 = new Date(year, 0, 1);
+    const jan1Day = jan1.getDay();
+    const daysBack = (jan1Day + 6) % 7;
+    const week1Monday = new Date(jan1);
+    week1Monday.setDate(jan1.getDate() - daysBack);
+    weekNum = Math.floor((endDateObj.getTime() - week1Monday.getTime()) / (7 * 86400000)) + 1;
+  }
 
   if (options.verbose) {
     console.log(`Date range: ${startDate} to ${endDate}`);
@@ -135,16 +168,18 @@ export async function runGetGA4Stats(options: GetGA4StatsOptions): Promise<void>
     return;
   }
 
-  // Check for duplicate week
-  console.log("Checking for duplicate week...");
-  const existing = await getColumnAValues();
-  if (existing.includes(weekEnding)) {
-    console.error(`Row for week ending ${weekEnding} already exists. Skipping.`);
+  // Find the row by week label in column B
+  const label = weekLabel(weekNum);
+  console.log(`Looking for ${label} in spreadsheet...`);
+  const rowNum = await findRowByWeek(label);
+
+  if (!rowNum) {
+    console.error(`Row for ${label} not found in column B. Cannot write.`);
     return;
   }
 
-  // Append to sheet
-  console.log("Writing to Google Sheet...");
-  await appendRow(metricsToRow(weekEnding, metrics));
-  console.log(`Row appended for week ending ${weekEnding}.`);
+  // Upsert mapped cells
+  console.log(`Found ${label} at row ${rowNum}. Writing metrics...`);
+  await updateMappedCells(rowNum, metricsToRecord(metrics), METRIC_COLUMN_MAP);
+  console.log(`Metrics updated for ${label}.`);
 }

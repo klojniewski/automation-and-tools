@@ -2,6 +2,8 @@
 import { Command } from "commander";
 import { runAnalysis } from "./commands/analyze.js";
 import { runGetGA4Stats } from "./commands/marketing/getga4stats.js";
+import { runGetPipedriveDeals } from "./commands/marketing/getpipedrivedeals.js";
+import { runUpdateScorecard } from "./commands/marketing/updatescorecard.js";
 
 const program = new Command();
 
@@ -47,6 +49,48 @@ marketing
     try {
       await runGetGA4Stats({
         week: opts.week,
+        dryRun: opts.dryRun ?? false,
+        verbose: opts.verbose ?? false,
+      });
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+marketing
+  .command("getpipedrivedeals")
+  .description("Fetch weekly Pipedrive deals created count and write to Google Sheet")
+  .option("-w, --week <YYWW>", "Year+week, e.g. 2601 (default: last completed week)")
+  .option("-p, --pipeline <id>", "Pipedrive pipeline ID", "22")
+  .option("--dry-run", "Show count without writing to Sheet")
+  .option("-v, --verbose", "Print extra debug info")
+  .action(async (opts) => {
+    try {
+      await runGetPipedriveDeals({
+        week: opts.week,
+        pipeline: parseInt(opts.pipeline),
+        dryRun: opts.dryRun ?? false,
+        verbose: opts.verbose ?? false,
+      });
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+marketing
+  .command("updateScorecard")
+  .description("Fetch GA4 + Pipedrive data and update weekly scorecard in Google Sheet")
+  .option("-w, --week <YYWW>", "Year+week, e.g. 2606 (default: last completed week)")
+  .option("-p, --pipeline <id>", "Pipedrive pipeline ID", "22")
+  .option("--dry-run", "Show data without writing to Sheet")
+  .option("-v, --verbose", "Print extra debug info")
+  .action(async (opts) => {
+    try {
+      await runUpdateScorecard({
+        week: opts.week,
+        pipeline: parseInt(opts.pipeline),
         dryRun: opts.dryRun ?? false,
         verbose: opts.verbose ?? false,
       });

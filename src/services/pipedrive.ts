@@ -71,6 +71,53 @@ export async function getDealActivities(dealId: number, limit = 5) {
   return response.data ?? [];
 }
 
+/**
+ * Fetch deals created in a specific pipeline within a date range.
+ * Paginates through results sorted by add_time desc, stopping early
+ * once deals are older than startDate.
+ * Optionally includes custom fields in the response.
+ */
+export async function fetchDealsInRange(
+  pipelineId: number,
+  startDate: string, // YYYY-MM-DD
+  endDate: string,   // YYYY-MM-DD
+  customFieldKeys?: string[],
+): Promise<DealItem[]> {
+  const dealsApi = new DealsApi(createConfig());
+  const start = new Date(startDate + "T00:00:00Z");
+  const end = new Date(endDate + "T23:59:59Z");
+  const matched: DealItem[] = [];
+  let cursor: string | undefined;
+
+  outer:
+  do {
+    const response = await dealsApi.getDeals({
+      pipeline_id: pipelineId,
+      sort_by: "add_time",
+      sort_direction: "desc",
+      limit: 100,
+      cursor,
+      ...(customFieldKeys?.length ? { custom_fields: customFieldKeys.join(",") } : {}),
+    });
+
+    for (const deal of response.data ?? []) {
+      const addTime = deal.add_time ? new Date(deal.add_time) : null;
+      if (!addTime) continue;
+
+      // Sorted desc — if before start, we're done
+      if (addTime < start) break outer;
+
+      if (addTime <= end) {
+        matched.push(deal);
+      }
+    }
+
+    cursor = response.additional_data?.next_cursor ?? undefined;
+  } while (cursor);
+
+  return matched;
+}
+
 export async function getStagesMap(): Promise<Map<number, string>> {
   const stagesApi = new StagesApi(createConfig());
   const response = await stagesApi.getStages({} as any);
