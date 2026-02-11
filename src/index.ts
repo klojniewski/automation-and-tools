@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { runAnalysis } from "./commands/analyze.js";
-import { runGetGA4Stats } from "./commands/marketing/getga4stats.js";
-import { runGetPipedriveDeals } from "./commands/marketing/getpipedrivedeals.js";
-import { runUpdateScorecard } from "./commands/marketing/updatescorecard.js";
+import { analyzeDealPipeline } from "./lib/deal-analysis.js";
+import { getGA4Stats } from "./lib/ga4-stats.js";
+import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
+import { updateScorecard } from "./lib/scorecard.js";
 
 const program = new Command();
 
@@ -18,17 +18,14 @@ program
   .option("-l, --limit <n>", "Max deals to analyze", "50")
   .option("--email-days <n>", "Email history window in days", "90")
   .option("--max-emails <n>", "Max emails per contact", "10")
-  .option("--dry-run", "Show data without calling Claude")
-  .option("-v, --verbose", "Print detailed API data")
   .action(async (opts) => {
     try {
-      await runAnalysis({
+      const result = await analyzeDealPipeline({
         limit: parseInt(opts.limit),
         emailDays: parseInt(opts.emailDays),
         maxEmails: parseInt(opts.maxEmails),
-        dryRun: opts.dryRun ?? false,
-        verbose: opts.verbose ?? false,
       });
+      console.log(JSON.stringify(result, null, 2));
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);
@@ -44,14 +41,13 @@ marketing
   .description("Fetch weekly GA4 metrics and append to Google Sheet")
   .option("-w, --week <YYWW>", "Year+week, e.g. 2601 (default: last completed week)")
   .option("--dry-run", "Show metrics without writing to Sheet")
-  .option("-v, --verbose", "Print extra debug info")
   .action(async (opts) => {
     try {
-      await runGetGA4Stats({
+      const result = await getGA4Stats({
         week: opts.week,
         dryRun: opts.dryRun ?? false,
-        verbose: opts.verbose ?? false,
       });
+      console.log(JSON.stringify(result, null, 2));
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);
@@ -64,15 +60,14 @@ marketing
   .option("-w, --week <YYWW>", "Year+week, e.g. 2601 (default: last completed week)")
   .option("-p, --pipeline <id>", "Pipedrive pipeline ID", "22")
   .option("--dry-run", "Show count without writing to Sheet")
-  .option("-v, --verbose", "Print extra debug info")
   .action(async (opts) => {
     try {
-      await runGetPipedriveDeals({
+      const result = await getPipedriveDeals({
         week: opts.week,
         pipeline: parseInt(opts.pipeline),
         dryRun: opts.dryRun ?? false,
-        verbose: opts.verbose ?? false,
       });
+      console.log(JSON.stringify(result, null, 2));
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);
@@ -85,15 +80,14 @@ marketing
   .option("-w, --week <YYWW>", "Year+week, e.g. 2606 (default: last completed week)")
   .option("-p, --pipeline <id>", "Pipedrive pipeline ID", "22")
   .option("--dry-run", "Show data without writing to Sheet")
-  .option("-v, --verbose", "Print extra debug info")
   .action(async (opts) => {
     try {
-      await runUpdateScorecard({
+      const result = await updateScorecard({
         week: opts.week,
         pipeline: parseInt(opts.pipeline),
         dryRun: opts.dryRun ?? false,
-        verbose: opts.verbose ?? false,
       });
+      console.log(JSON.stringify(result, null, 2));
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);

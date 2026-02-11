@@ -1,18 +1,19 @@
-import { google } from "googleapis";
+import { google, type Auth } from "googleapis";
 
 const SA_SCOPES = [
   "https://www.googleapis.com/auth/analytics.readonly",
   "https://www.googleapis.com/auth/spreadsheets",
 ];
 
-let _saAuth: InstanceType<typeof google.auth.GoogleAuth> | null = null;
+let _saClient: Auth.OAuth2Client | Auth.GoogleAuth | null = null;
 
 /**
  * Service-account auth for GA4 + Sheets.
  * Reads GOOGLE_SERVICE_ACCOUNT_KEY (JSON or base64-encoded JSON) from env.
+ * Returns a GoogleAuth instance typed to work with googleapis client factories.
  */
-export function getGoogleAuth() {
-  if (_saAuth) return _saAuth;
+export function getGoogleAuth(): Auth.GoogleAuth {
+  if (_saClient) return _saClient as Auth.GoogleAuth;
 
   const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (!keyJson) {
@@ -26,17 +27,18 @@ export function getGoogleAuth() {
     credentials = JSON.parse(Buffer.from(keyJson, "base64").toString("utf-8"));
   }
 
-  _saAuth = new google.auth.GoogleAuth({ credentials, scopes: SA_SCOPES });
-  return _saAuth;
+  const auth = new google.auth.GoogleAuth({ credentials, scopes: SA_SCOPES });
+  _saClient = auth;
+  return auth;
 }
 
-let _gmailAuth: InstanceType<typeof google.auth.OAuth2> | null = null;
+let _gmailAuth: Auth.OAuth2Client | null = null;
 
 /**
  * OAuth2 auth for Gmail (service accounts can't access personal Gmail).
  * Uses a stored refresh token reconstructed from env vars.
  */
-export function getGmailAuth() {
+export function getGmailAuth(): Auth.OAuth2Client {
   if (_gmailAuth) return _gmailAuth;
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
