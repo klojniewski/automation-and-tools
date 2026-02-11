@@ -20,6 +20,9 @@ interface ChannelStats { all: number; mql: number; sql: number }
 
 function aggregateDeals(deals: DealItem[]) {
   const channels: Record<string, ChannelStats> = {};
+  for (const label of Object.values(CHANNEL_LABELS)) {
+    channels[label] = { all: 0, mql: 0, sql: 0 };
+  }
   let totalMql = 0;
   let totalSql = 0;
 
