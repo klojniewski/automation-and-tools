@@ -124,7 +124,13 @@ IMPORTANT formatting rules:
   if (!toolBlock) throw new Error("No structured response from Claude");
 
   const input = toolBlock.input as any;
-  const data = input.deals ? input : { deals: Array.isArray(input) ? input : [input] };
+  let deals = input.deals ?? input;
+  if (typeof deals === "string") {
+    deals = JSON.parse(deals);
+  }
+  if (!Array.isArray(deals)) {
+    deals = [deals];
+  }
 
-  return DealPrioritySchema.parse(data);
+  return DealPrioritySchema.parse({ deals });
 }

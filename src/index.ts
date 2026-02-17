@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { analyzeDealPipeline } from "./lib/deal-analysis.js";
+import type { DealAnalysisResult } from "./lib/deal-analysis.js";
 import { getGA4Stats } from "./lib/ga4-stats.js";
 import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
 import { updateScorecard } from "./lib/scorecard.js";
+import { getEnv } from "./lib/env.js";
 
 const program = new Command();
 
@@ -25,7 +27,7 @@ program
         emailDays: parseInt(opts.emailDays),
         maxEmails: parseInt(opts.maxEmails),
       });
-      console.log(JSON.stringify(result, null, 2));
+      printDealAnalysis(result);
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);
@@ -93,5 +95,62 @@ marketing
       process.exit(1);
     }
   });
+
+function printDealAnalysis(result: DealAnalysisResult) {
+  const env = getEnv();
+  const pipedriveUrl = `https://${env.PIPEDRIVE_DOMAIN}.pipedrive.com/deal`;
+
+  const healthIcon: Record<string, string> = {
+    hot: "!!!",
+    warm: "!! ",
+    cold: "!  ",
+    at_risk: "!!!",
+  };
+  const urgencyLabel: Record<string, string> = {
+    immediate: "NOW",
+    this_week: "THIS WEEK",
+    next_week: "NEXT WEEK",
+    no_rush: "LOW",
+  };
+
+  console.log("\n========================================");
+  console.log("         DEAL PRIORITIES");
+  console.log(`    ${result.dealsAnalyzed} deals analyzed`);
+  console.log("========================================\n");
+
+  const sorted = result.analysis.deals.sort((a, b) => a.priority_rank - b.priority_rank);
+
+  for (const deal of sorted) {
+    console.log(`#${deal.priority_rank} [${healthIcon[deal.deal_health] ?? "   "}] ${deal.deal_title}`);
+    console.log(`URL: ${pipedriveUrl}/${deal.deal_id}`);
+    console.log(`Health: ${deal.deal_health.toUpperCase()} | Urgency: ${urgencyLabel[deal.urgency] ?? deal.urgency}`);
+
+    console.log("\nAction:");
+    for (const action of deal.recommended_actions) {
+      console.log(`  - ${action}`);
+    }
+
+    console.log("\nWhy:");
+    for (const reason of deal.reasoning) {
+      console.log(`  - ${reason}`);
+    }
+
+    if (deal.key_signals.length > 0) {
+      console.log("\nSignals:");
+      for (const signal of deal.key_signals) {
+        console.log(`  - ${signal}`);
+      }
+    }
+
+    if (deal.deal_history.length > 0) {
+      console.log("\nDeal History:");
+      for (const entry of deal.deal_history) {
+        console.log(`  - ${entry.date}: ${entry.summary}`);
+      }
+    }
+
+    console.log("\n----------------------------------------\n");
+  }
+}
 
 program.parse();
