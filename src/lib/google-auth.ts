@@ -55,3 +55,27 @@ export function getGmailAuth(): Auth.OAuth2Client {
   _gmailAuth.setCredentials({ refresh_token: refreshToken });
   return _gmailAuth;
 }
+
+let _youtubeAuth: Auth.OAuth2Client | null = null;
+
+/**
+ * OAuth2 auth for YouTube Analytics (Brand Accounts require OAuth, not delegation).
+ * Uses a stored refresh token scoped to yt-analytics.readonly.
+ */
+export function getYouTubeAuth(): Auth.OAuth2Client {
+  if (_youtubeAuth) return _youtubeAuth;
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_YOUTUBE_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      "YouTube OAuth env vars missing: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_YOUTUBE_REFRESH_TOKEN",
+    );
+  }
+
+  _youtubeAuth = new google.auth.OAuth2(clientId, clientSecret);
+  _youtubeAuth.setCredentials({ refresh_token: refreshToken });
+  return _youtubeAuth;
+}

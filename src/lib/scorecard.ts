@@ -1,5 +1,6 @@
 import { fetchGA4Metrics, type GA4Metrics } from "./ga4.js";
 import { fetchDealsInRange } from "./pipedrive.js";
+import { fetchYouTubeViews } from "./youtube.js";
 import { findRowByWeek, updateMappedCells } from "./sheets.js";
 import {
   SCORECARD_COLUMN_MAP,
@@ -94,6 +95,7 @@ export interface ScorecardResult {
   ga4: GA4Metrics;
   deals: { total: number; mql: number; sql: number };
   channels: Record<string, ChannelStats>;
+  youtubeViews: number;
 }
 
 export async function updateScorecard(options: {
@@ -104,9 +106,10 @@ export async function updateScorecard(options: {
   const pipelineId = options.pipeline ?? DEFAULT_PIPELINE;
   const { weekNum, startDate, endDate } = resolveWeek(options.week);
 
-  const [metrics, deals] = await Promise.all([
+  const [metrics, deals, youtubeViews] = await Promise.all([
     fetchGA4Metrics(startDate, endDate),
     fetchDealsInRange(pipelineId, startDate, endDate, [MQL_FIELD_KEY, SQL_FIELD_KEY]),
+    fetchYouTubeViews(startDate, endDate),
   ]);
 
   const { channels, totalMql, totalSql } = aggregateDeals(deals);
@@ -121,6 +124,7 @@ export async function updateScorecard(options: {
     ga4: metrics,
     deals: { total: deals.length, mql: totalMql, sql: totalSql },
     channels,
+    youtubeViews,
   };
 
   if (options.dryRun) return base;
@@ -131,6 +135,7 @@ export async function updateScorecard(options: {
   const allData: Record<string, string | number> = {
     ...ga4ToRecord(metrics),
     ...dealsToRecord(deals, channels, totalMql, totalSql),
+    youtubeViews,
   };
 
   await updateMappedCells(rowNum, allData, SCORECARD_COLUMN_MAP);

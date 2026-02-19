@@ -44,12 +44,14 @@ export const EXCLUDED_LANDING_PAGES = [
 /** Maps GA4 metric keys to Google Sheet column letters. */
 export const METRIC_COLUMN_MAP: Record<string, string> = {
   totalTraffic:             "C",
-  referral:                 "N",
-  direct:                   "P",
-  aiTraffic:                "S",
-  qualityTraffic:           "J",
-  blogTraffic:              "L",
-  paidTraffic:              "R",
+  totalBofu:                "H",
+  notPaidBofu:              "J",
+  qualityTraffic:           "N",
+  blogTraffic:              "P",
+  referral:                 "R",
+  direct:                   "T",
+  paidTraffic:              "V",
+  aiTraffic:                "W",
 };
 
 /**
@@ -106,32 +108,34 @@ export const YOUTUBE_COLUMN_MAP: Record<string, string> = {
 export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   // GA4 metrics
   totalTraffic:             "C",
-  referral:                 "R",
-  direct:                   "T",
-  aiTraffic:                "W",
+  totalBofu:                "H",
+  notPaidBofu:              "J",
   qualityTraffic:           "N",
   blogTraffic:              "P",
+  referral:                 "R",
+  direct:                   "T",
   paidTraffic:              "V",
-
-  // Pipedrive deals
-  dealsCreated:             "AG",
-  mql:                      "AH",
-  sql:                      "AI",
-  channel_390_mql:          "U",
-  channel_390_sql:          "V",
-  channel_389_mql:          "Y",
-  channel_389_sql:          "Z",
-  channel_387_mql:          "W",
-  channel_387_sql:          "X",
-  channel_323_mql:          "AE",
-  channel_323_sql:          "AF",
-  channel_388_mql:          "AA",
-  channel_388_sql:          "AB",
-  channel_318_mql:          "AC",
-  channel_318_sql:          "AD",
+  aiTraffic:                "W",
 
   // YouTube
-  youtubeViews:             "AL",
+  youtubeViews:             "X",
+
+  // Pipedrive deals
+  channel_390_mql:          "Y",  // Website / Organic
+  channel_390_sql:          "Z",  // Website / Organic
+  channel_387_mql:          "AA", // AI Search
+  channel_387_sql:          "AB", // AI Search
+  channel_389_mql:          "AC", // Referral / Network
+  channel_389_sql:          "AD", // Referral / Network
+  channel_388_mql:          "AE", // Paid Search
+  channel_388_sql:          "AF", // Paid Search
+  channel_318_mql:          "AG", // Marketplaces
+  channel_318_sql:          "AH", // Marketplaces
+  channel_323_mql:          "AI", // Outreach
+  channel_323_sql:          "AJ", // Outreach
+  dealsCreated:             "AK",
+  mql:                      "AL",
+  sql:                      "AM",
 };
 
 /** Metric labels in the order they appear in the Google Sheet columns. */

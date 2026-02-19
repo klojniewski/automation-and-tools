@@ -14,6 +14,7 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   GOOGLE_GMAIL_REFRESH_TOKEN: z.string().default(""),
+  GOOGLE_YOUTUBE_REFRESH_TOKEN: z.string().default(""),
 
   // Legacy paths — only used by local CLI fallback
   GMAIL_CREDENTIALS_PATH: z.string().default("./credentials.json"),

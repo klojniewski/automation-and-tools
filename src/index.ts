@@ -4,6 +4,7 @@ import { analyzeDealPipeline } from "./lib/deal-analysis.js";
 import type { DealAnalysisResult } from "./lib/deal-analysis.js";
 import { getGA4Stats } from "./lib/ga4-stats.js";
 import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
+import { getYouTubeStats } from "./lib/youtube-stats.js";
 import { updateScorecard } from "./lib/scorecard.js";
 import { getEnv } from "./lib/env.js";
 
@@ -67,6 +68,24 @@ marketing
       const result = await getPipedriveDeals({
         week: opts.week,
         pipeline: parseInt(opts.pipeline),
+        dryRun: opts.dryRun ?? false,
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+marketing
+  .command("getyoutubestats")
+  .description("Fetch weekly YouTube channel views and write to Google Sheet")
+  .option("-w, --week <YYWW>", "Year+week, e.g. 2601 (default: last completed week)")
+  .option("--dry-run", "Show views without writing to Sheet")
+  .action(async (opts) => {
+    try {
+      const result = await getYouTubeStats({
+        week: opts.week,
         dryRun: opts.dryRun ?? false,
       });
       console.log(JSON.stringify(result, null, 2));
