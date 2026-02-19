@@ -78,35 +78,40 @@ export const CHANNEL_LABELS: Record<string, string> = {
  * Maps Pipedrive deals metric keys to Google Sheet column letters.
  */
 export const DEALS_COLUMN_MAP: Record<string, string> = {
-  dealsCreated:      "AG",
-  mql:               "AH",
-  sql:               "AI",
-  channel_390_mql:   "U",
-  channel_390_sql:   "V",
-  channel_389_mql:   "Y",
-  channel_389_sql:   "Z",
-  channel_387_mql:   "W",
-  channel_387_sql:   "X",
-  channel_323_mql:   "AE",
-  channel_323_sql:   "AF",
-  channel_388_mql:   "AA",
-  channel_388_sql:   "AB",
-  channel_318_mql:   "AC",
-  channel_318_sql:   "AD",
+  dealsCreated:      "AK",
+  mql:               "AL",
+  sql:               "AM",
+  channel_390_mql:   "Y",//Website / Organic
+  channel_390_sql:   "Z",//Website / Organic
+  channel_389_mql:   "AC",//Referral / Network
+  channel_389_sql:   "AD",//Referral / Network
+  channel_387_mql:   "AA",//AI Search  
+  channel_387_sql:   "AB",//AI Search  
+  channel_323_mql:   "AI",//Outreach
+  channel_323_sql:   "AJ",//Outreach
+  channel_388_mql:   "AE",//Paid Search
+  channel_388_sql:   "AF",//Paid Search
+  channel_318_mql:   "AG",//Marketplaces
+  channel_318_sql:   "AH",//Marketplaces
+};
+
+/** Maps YouTube metric keys to Google Sheet column letters. */
+export const YOUTUBE_COLUMN_MAP: Record<string, string> = {
+  youtubeViews: "X",
 };
 
 /**
- * Unified column map for `updateScorecard` — GA4 + Pipedrive combined.
+ * Unified column map for `updateScorecard` — GA4 + Pipedrive + YouTube combined.
  */
 export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   // GA4 metrics
   totalTraffic:             "C",
-  referral:                 "N",
-  direct:                   "P",
-  aiTraffic:                "S",
-  qualityTraffic:           "J",
-  blogTraffic:              "L",
-  paidTraffic:              "R",
+  referral:                 "R",
+  direct:                   "T",
+  aiTraffic:                "W",
+  qualityTraffic:           "N",
+  blogTraffic:              "P",
+  paidTraffic:              "V",
 
   // Pipedrive deals
   dealsCreated:             "AG",
@@ -124,6 +129,9 @@ export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   channel_388_sql:          "AB",
   channel_318_mql:          "AC",
   channel_318_sql:          "AD",
+
+  // YouTube
+  youtubeViews:             "AL",
 };
 
 /** Metric labels in the order they appear in the Google Sheet columns. */
