@@ -68,6 +68,15 @@ function pagePathExact(value: string): FilterExpression {
   };
 }
 
+function pagePathRegex(value: string): FilterExpression {
+  return {
+    filter: {
+      fieldName: "pagePathPlusQueryString",
+      stringFilter: { matchType: "FULL_REGEXP", value: `^${value}($|\\?)` },
+    },
+  };
+}
+
 function sourceContains(value: string): FilterExpression {
   return {
     filter: {
@@ -82,7 +91,7 @@ function bofuFilter(): FilterExpression {
     orGroup: {
       expressions: [
         ...BOFU_PAGES.map(pagePathContains),
-        pagePathExact(HOMEPAGE_PATH),
+        pagePathRegex(HOMEPAGE_PATH),
       ],
     },
   };
@@ -154,12 +163,20 @@ export async function fetchGA4Metrics(
     requestBody: {
       requests: [
         baseReport(startDate, endDate),
-        baseReport(startDate, endDate, bofuFilter()),
-        baseReport(startDate, endDate, {
-          andGroup: {
-            expressions: [bofuFilter(), notPaidChannel()],
+        {
+          dateRanges: [{ startDate, endDate }],
+          metrics: [{ name: "activeUsers" }],
+          dimensionFilter: bofuFilter(),
+        },
+        {
+          dateRanges: [{ startDate, endDate }],
+          metrics: [{ name: "activeUsers" }],
+          dimensionFilter: {
+            andGroup: {
+              expressions: [bofuFilter(), notPaidChannel()],
+            },
           },
-        }),
+        },
         baseReport(startDate, endDate, channelIn(["Organic Search", "Organic Social"])),
         baseReport(startDate, endDate, {
           andGroup: {
