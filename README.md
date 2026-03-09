@@ -25,9 +25,15 @@ npx tsx src/index.ts <command>
 ### Deal Intelligence
 
 ```bash
-# Analyze deals with AI prioritization
+# Analyze deals with AI prioritization (top 20 by default, excludes "Lead In" stage)
 npx tsx src/index.ts analyze
-npx tsx src/index.ts analyze --limit 20 --email-days 60 --max-emails 5
+npx tsx src/index.ts analyze --top 5                          # quick top 5
+npx tsx src/index.ts analyze --top 10 --limit 50              # top 10 from up to 50 deals
+npx tsx src/index.ts analyze --exclude-stages "Lead In" "Contact Made"
+
+# Analyze a single deal by ID (includes Gmail links in history)
+npx tsx src/index.ts deal 6877
+npx tsx src/index.ts deal 6877 --email-days 30 --max-emails 5
 ```
 
 ### Marketing Scorecard

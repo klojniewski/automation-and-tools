@@ -16,9 +16,17 @@ export async function validateCredentials(): Promise<void> {
   await new DealsApi(createConfig()).getDeals({ limit: 1 });
 }
 
+export async function getDealById(dealId: number): Promise<DealItem> {
+  const dealsApi = new DealsApi(createConfig());
+  const response = await dealsApi.getDeal({ id: dealId });
+  if (!response.data) throw new Error(`Deal ${dealId} not found`);
+  return response.data;
+}
+
 export async function getOpenDeals(
   ownerId: number,
   limit = 100,
+  options?: { pipelineId?: number; excludeStageIds?: number[] },
 ): Promise<DealItem[]> {
   const dealsApi = new DealsApi(createConfig());
   const allDeals: DealItem[] = [];
@@ -32,8 +40,15 @@ export async function getOpenDeals(
       cursor,
       sort_by: "update_time",
       sort_direction: "desc",
+      ...(options?.pipelineId ? { pipeline_id: options.pipelineId } : {}),
     });
-    allDeals.push(...(response.data ?? []));
+    const batch = (response.data ?? []).filter((deal) => {
+      if (options?.excludeStageIds?.length && deal.stage_id != null) {
+        return !options.excludeStageIds.includes(deal.stage_id);
+      }
+      return true;
+    });
+    allDeals.push(...batch);
     cursor = response.additional_data?.next_cursor ?? undefined;
     if (!cursor) break;
   } while (allDeals.length < limit);

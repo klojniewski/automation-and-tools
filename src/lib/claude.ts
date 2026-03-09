@@ -17,6 +17,7 @@ export const DealPrioritySchema = z.object({
         z.object({
           date: z.string(),
           summary: z.string(),
+          email_link: z.string().optional(),
         }),
       ),
     }),
@@ -25,11 +26,11 @@ export const DealPrioritySchema = z.object({
 
 export type DealPriority = z.infer<typeof DealPrioritySchema>;
 
-export async function analyzeDeals(dealContexts: string): Promise<DealPriority> {
+export async function analyzeDeals(dealContexts: string, topN?: number): Promise<DealPriority> {
   const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 16384,
+    max_tokens: 12000,
     system: `You are a sales intelligence analyst specializing in software services & consulting (web development, app builds, SLAs, replatforming, technical consulting).
 
 Apply the Challenger Sales methodology:
@@ -40,10 +41,12 @@ Apply the Challenger Sales methodology:
 Factor in typical software consulting dynamics: scope creep risk, decision-by-committee, technical evaluation cycles, budget approval processes.
 
 Analyze these CRM deals and their email communication history. Rank deals by priority (1 = most urgent). Consider: staleness of communication, deal value, deal stage, email sentiment, and whether the contact is responsive.
+${topN ? `\nIMPORTANT: Only return the top ${topN} highest-priority deals. Do NOT return all deals.` : ""}
 
 IMPORTANT formatting rules:
 - Return concise bullet points, NOT full sentences
 - Each bullet should be a scannable phrase (e.g. "£15.6K value, strong momentum" not "The deal value is £15.6K and there is strong momentum")
+- LIMIT: max 3 items per recommended_actions, reasoning, and key_signals — pick only the most impactful
 - For deal_history: extract the 5 most recent actions/activities/emails from the deal context, return in reverse chronological order (latest first), each with a short date and one-line summary`,
     messages: [{ role: "user", content: dealContexts }],
     tools: [
@@ -72,17 +75,20 @@ IMPORTANT formatting rules:
                   recommended_actions: {
                     type: "array",
                     items: { type: "string" },
-                    description: "Concise bullet points for next actions using Challenger methodology — push toward decisions, create tension, reframe thinking",
+                    maxItems: 3,
+                    description: "Top 3 concise bullet points for next actions using Challenger methodology — push toward decisions, create tension, reframe thinking",
                   },
                   reasoning: {
                     type: "array",
                     items: { type: "string" },
-                    description: "Concise bullet points explaining why this deal is ranked here",
+                    maxItems: 3,
+                    description: "Top 3 concise bullet points explaining why this deal is ranked here",
                   },
                   key_signals: {
                     type: "array",
                     items: { type: "string" },
-                    description: "Short signal phrases from emails/activities",
+                    maxItems: 3,
+                    description: "Top 3 short signal phrases from emails/activities",
                   },
                   deal_history: {
                     type: "array",
@@ -91,10 +97,11 @@ IMPORTANT formatting rules:
                       properties: {
                         date: { type: "string", description: "Short date like 'Feb 5' or 'Jan 30'" },
                         summary: { type: "string", description: "One short sentence summarizing the action" },
+                        email_link: { type: "string", description: "Gmail link if this entry is from an email (copy the Link: URL from the email history). Omit if not from email." },
                       },
                       required: ["date", "summary"],
                     },
-                    description: "Last 5 actions/activities/emails, latest first",
+                    description: "Last 5 actions/activities/emails, latest first. Include email_link when available.",
                   },
                 },
                 required: [
@@ -124,12 +131,30 @@ IMPORTANT formatting rules:
   if (!toolBlock) throw new Error("No structured response from Claude");
 
   const input = toolBlock.input as any;
-  let deals = input.deals ?? input;
-  if (typeof deals === "string") {
-    deals = JSON.parse(deals);
+
+  // Handle various response shapes from Claude
+  let deals: any;
+  if (Array.isArray(input.deals)) {
+    deals = input.deals;
+  } else if (Array.isArray(input)) {
+    deals = input;
+  } else if (typeof input.deals === "string") {
+    deals = JSON.parse(input.deals);
+  } else if (typeof input === "string") {
+    deals = JSON.parse(input);
+  } else {
+    // Possibly nested one level deeper — check for any array property
+    const arrayProp = Object.values(input).find(Array.isArray);
+    if (arrayProp) {
+      deals = arrayProp;
+    } else {
+      deals = [input];
+    }
   }
-  if (!Array.isArray(deals)) {
-    deals = [deals];
+
+  // Unwrap if deals are wrapped in an extra object (e.g. [{deals: [...]}])
+  if (deals.length === 1 && Array.isArray(deals[0]?.deals)) {
+    deals = deals[0].deals;
   }
 
   return DealPrioritySchema.parse({ deals });

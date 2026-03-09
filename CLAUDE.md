@@ -21,7 +21,11 @@ npx tsx src/index.ts <command>
 
 **Deal intelligence:**
 - `analyze` — AI-powered deal prioritization with Gmail context
-  - Options: `--limit <n>`, `--email-days <n>`, `--max-emails <n>`
+  - Options: `--limit <n>`, `--top <n>` (default 20), `--email-days <n>`, `--max-emails <n>`, `-p <pipeline>`, `--exclude-stages <stages...>`
+  - Excludes "Lead In" stage by default
+- `deal <id>` — analyze a single deal by Pipedrive deal ID
+  - Options: `--email-days <n>`, `--max-emails <n>`
+  - Output includes Gmail links in deal history
 
 **Marketing scorecard:**
 - `marketing getga4stats` — fetch weekly GA4 metrics

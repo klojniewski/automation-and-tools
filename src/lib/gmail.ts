@@ -38,6 +38,7 @@ export async function searchEmails(
       const getHeader = (name: string) =>
         headers.find((h) => h.name === name)?.value ?? "";
       return {
+        id: msg.id!,
         from: getHeader("From"),
         to: getHeader("To"),
         subject: getHeader("Subject"),

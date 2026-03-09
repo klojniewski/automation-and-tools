@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { analyzeDealPipeline } from "./lib/deal-analysis.js";
+import { analyzeDealPipeline, analyzeSingleDeal } from "./lib/deal-analysis.js";
 import type { DealAnalysisResult } from "./lib/deal-analysis.js";
 import { getGA4Stats } from "./lib/ga4-stats.js";
 import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
@@ -21,10 +21,35 @@ program
   .option("-l, --limit <n>", "Max deals to analyze", "50")
   .option("--email-days <n>", "Email history window in days", "90")
   .option("--max-emails <n>", "Max emails per contact", "10")
+  .option("-p, --pipeline <id>", "Pipedrive pipeline ID")
+  .option("--exclude-stages <stages...>", "Stage names to exclude (e.g. 'Lead In')")
+  .option("-t, --top <n>", "Number of top deals to return", "20")
   .action(async (opts) => {
     try {
       const result = await analyzeDealPipeline({
         limit: parseInt(opts.limit),
+        emailDays: parseInt(opts.emailDays),
+        maxEmails: parseInt(opts.maxEmails),
+        pipeline: opts.pipeline ? parseInt(opts.pipeline) : undefined,
+        excludeStages: opts.excludeStages,
+        top: parseInt(opts.top),
+      });
+      printDealAnalysis(result);
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("deal <id>")
+  .description("Analyze a single deal by Pipedrive deal ID")
+  .option("--email-days <n>", "Email history window in days", "90")
+  .option("--max-emails <n>", "Max emails per contact", "10")
+  .action(async (id: string, opts) => {
+    try {
+      const result = await analyzeSingleDeal({
+        dealId: parseInt(id),
         emailDays: parseInt(opts.emailDays),
         maxEmails: parseInt(opts.maxEmails),
       });
@@ -164,7 +189,8 @@ function printDealAnalysis(result: DealAnalysisResult) {
     if (deal.deal_history.length > 0) {
       console.log("\nDeal History:");
       for (const entry of deal.deal_history) {
-        console.log(`  - ${entry.date}: ${entry.summary}`);
+        const link = entry.email_link ? ` ${entry.email_link}` : "";
+        console.log(`  - ${entry.date}: ${entry.summary}${link}`);
       }
     }
 

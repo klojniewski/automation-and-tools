@@ -1,6 +1,7 @@
 import {
   validateCredentials,
   getOpenDeals,
+  getDealById,
   getDealContacts,
   getDealActivities,
   getStagesMap,
@@ -75,7 +76,7 @@ async function enrichDeal(
   const emailSummary =
     allEmails.length > 0
       ? allEmails
-          .map((e) => `[${e.date}] ${e.from} -> ${e.to} | Subject: ${e.subject} | ${e.snippet}`)
+          .map((e) => `[${e.date}] ${e.from} -> ${e.to} | Subject: ${e.subject} | ${e.snippet} | Link: https://mail.google.com/mail/u/0/#inbox/${e.id}`)
           .join("\n")
       : "No email communication found.";
 
@@ -100,6 +101,9 @@ export async function analyzeDealPipeline(options: {
   limit?: number;
   emailDays?: number;
   maxEmails?: number;
+  pipeline?: number;
+  excludeStages?: string[];
+  top?: number;
 }): Promise<DealAnalysisResult> {
   const limit = options.limit ?? 50;
   const emailDays = options.emailDays ?? 90;
@@ -114,10 +118,28 @@ export async function analyzeDealPipeline(options: {
 
   // Fetch stages and deals in parallel
   const env = getEnv();
-  const [stages, deals] = await Promise.all([
+  const [stages, allDeals] = await Promise.all([
     getStagesMap(),
-    getOpenDeals(env.PIPEDRIVE_USER_ID, limit),
+    getOpenDeals(env.PIPEDRIVE_USER_ID, limit, {
+      pipelineId: options.pipeline,
+    }),
   ]);
+
+  // Filter out excluded stages by name
+  const excludeNames = (options.excludeStages ?? ["Lead In"]).map((s) => s.toLowerCase());
+  const excludeStageIds = excludeNames.length > 0
+    ? [...stages.entries()]
+        .filter(([, name]) => excludeNames.includes(name.toLowerCase()))
+        .map(([id]) => id)
+    : [];
+
+  const deals = excludeStageIds.length > 0
+    ? allDeals.filter((d) => !excludeStageIds.includes(d.stage_id ?? 0))
+    : allDeals;
+
+  if (excludeNames.length > 0) {
+    console.error(`Filtered out ${allDeals.length - deals.length} deals in stages: ${excludeNames.join(", ")}`);
+  }
 
   if (deals.length === 0) {
     return {
@@ -132,10 +154,38 @@ export async function analyzeDealPipeline(options: {
   );
 
   // Send to Claude for analysis
-  const analysis = await analyzeDeals(dealContexts.join("\n\n"));
+  const analysis = await analyzeDeals(dealContexts.join("\n\n"), options.top);
 
   return {
     dealsAnalyzed: deals.length,
+    analysis,
+  };
+}
+
+export async function analyzeSingleDeal(options: {
+  dealId: number;
+  emailDays?: number;
+  maxEmails?: number;
+}): Promise<DealAnalysisResult> {
+  const emailDays = options.emailDays ?? 90;
+  const maxEmails = options.maxEmails ?? 10;
+
+  const [, gmail] = await Promise.all([
+    validateCredentials(),
+    getGmailClient(),
+  ]);
+  await validateGmailCredentials(gmail);
+
+  const [stages, deal] = await Promise.all([
+    getStagesMap(),
+    getDealById(options.dealId),
+  ]);
+
+  const dealContext = await enrichDeal(deal, stages, gmail, emailDays, maxEmails);
+  const analysis = await analyzeDeals(dealContext);
+
+  return {
+    dealsAnalyzed: 1,
     analysis,
   };
 }
