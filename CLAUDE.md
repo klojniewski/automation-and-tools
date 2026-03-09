@@ -25,7 +25,7 @@ npx tsx src/index.ts <command>
   - Excludes "Lead In" stage by default
 - `deal <id>` — analyze a single deal by Pipedrive deal ID
   - Options: `--email-days <n>`, `--max-emails <n>`
-  - Output includes Gmail links in deal history
+  - Output includes: pipeline stage → next stage, draft follow-up email with send date, Gmail links in deal history
 
 **Marketing scorecard:**
 - `marketing getga4stats` — fetch weekly GA4 metrics
@@ -60,7 +60,7 @@ On-demand tasks can be triggered from the Trigger.dev dashboard or run locally v
 - `src/trigger/analyze-deals.ts` — deal analysis task
 - `src/trigger/get-pipedrive-deals.ts` — Pipedrive deals task
 - `src/lib/scorecard.ts` — orchestration (GA4 + Pipedrive + YouTube → Sheets)
-- `src/lib/deal-analysis.ts` — deal analysis logic (uses Claude AI)
+- `src/lib/deal-analysis.ts` — deal enrichment, pipeline stages, conversation status detection
 - `src/lib/pipedrive.ts` / `src/lib/pipedrive-stats.ts` — Pipedrive API wrappers
 - `src/lib/google-auth.ts` — all Google auth clients
 - `src/lib/marketing-config.ts` — column mappings
@@ -78,6 +78,10 @@ Run with `npx tsx scripts/<name>.ts` (requires `.env` with Google credentials).
   and totals. Useful for verifying the token works and the correct channel is linked.
 - **`test-youtube.ts`** — Tests the `fetchYouTubeViews` wrapper for a specific week.
   Shows both raw API response and wrapper output. Good for debugging scorecard data.
+- **`debug-deal.ts`** — Dumps all raw source data and Claude output for a deal.
+  Usage: `npx tsx scripts/debug-deal.ts <dealId> [emailDays] [maxEmails]`.
+  Creates `debug/<dealId>/` with .md files: raw deal, contacts, activities, emails,
+  enriched context, Claude prompt, and Claude output. Used for accuracy reviews.
 
 ## Google Auth
 

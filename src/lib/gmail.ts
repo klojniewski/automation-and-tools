@@ -10,6 +10,11 @@ export async function validateGmailCredentials(gmail: gmail_v1.Gmail): Promise<v
   await gmail.users.getProfile({ userId: "me" });
 }
 
+export async function getGmailUserEmail(gmail: gmail_v1.Gmail): Promise<string> {
+  const profile = await gmail.users.getProfile({ userId: "me" });
+  return profile.data.emailAddress ?? "";
+}
+
 export async function searchEmails(
   gmail: gmail_v1.Gmail,
   contactEmail: string,

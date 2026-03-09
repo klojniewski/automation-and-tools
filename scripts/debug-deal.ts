@@ -13,7 +13,7 @@ import {
   getStagesMap,
   getOrgName,
 } from "../src/lib/pipedrive.js";
-import { getGmailClient, validateGmailCredentials, searchEmails } from "../src/lib/gmail.js";
+import { getGmailClient, validateGmailCredentials, getGmailUserEmail, searchEmails } from "../src/lib/gmail.js";
 import { analyzeDeals } from "../src/lib/claude.js";
 import { getStagePipelineContext } from "../src/lib/deal-analysis.js";
 
@@ -44,6 +44,7 @@ async function main() {
   // Auth
   const [, gmail] = await Promise.all([validateCredentials(), getGmailClient()]);
   await validateGmailCredentials(gmail);
+  const userEmail = await getGmailUserEmail(gmail);
 
   // Fetch all raw data
   const [stages, deal, contacts, activities] = await Promise.all([
@@ -181,12 +182,27 @@ ${JSON.stringify(a, null, 2)}
 
   const pipelineContext = getStagePipelineContext(stageName);
 
+  // Conversation status
+  let conversationStatus = "";
+  if (allEmails.length > 0) {
+    const latest = allEmails[0];
+    const isOutbound = latest.from.toLowerCase().includes(userEmail.toLowerCase());
+    const emailDate = new Date(latest.date);
+    const daysSinceLastEmail = Math.floor((Date.now() - emailDate.getTime()) / 86_400_000);
+    const dateStr = emailDate.toISOString().split("T")[0];
+    if (isOutbound) {
+      conversationStatus = `\nConversation status: WAITING FOR REPLY — last email was outbound (from us) on ${dateStr} (${daysSinceLastEmail === 0 ? "today" : daysSinceLastEmail + "d ago"}). Ball is in prospect's court.`;
+    } else {
+      conversationStatus = `\nConversation status: ACTION NEEDED — last email was inbound (from prospect) on ${dateStr} (${daysSinceLastEmail === 0 ? "today" : daysSinceLastEmail + "d ago"}). Ball is in our court.`;
+    }
+  }
+
   const enrichedContext = `DEAL #${dealId}: ${deal.title}
 Organization: ${orgName ?? "Unknown"}
 Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
 Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
-${pipelineContext}
+${pipelineContext}${conversationStatus}
 
 Recent activities:
 ${activityList}

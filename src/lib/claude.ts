@@ -13,6 +13,13 @@ export const DealPrioritySchema = z.object({
       recommended_actions: z.array(z.string()),
       reasoning: z.array(z.string()),
       key_signals: z.array(z.string()),
+      current_stage: z.string(),
+      next_stage: z.string(),
+      draft_email: z.object({
+        send_date: z.string(),
+        subject: z.string(),
+        body: z.string(),
+      }),
       deal_history: z.array(
         z.object({
           date: z.string(),
@@ -46,6 +53,16 @@ Factor in typical software consulting dynamics: scope creep risk, decision-by-co
 Analyze these CRM deals and their email communication history. Rank deals by priority (1 = most urgent). Consider: staleness of communication, deal value, deal stage, email sentiment, and whether the contact is responsive.
 
 Each deal includes its current pipeline stage, what's needed to advance, and what the next stage requires. Use this to make recommended_actions specific to advancing the deal to the next stage. Focus on concrete actions that move the deal forward in the pipeline, not generic sales advice.
+
+CRITICAL — Conversation status awareness:
+- Each deal has a "Conversation status" line showing who emailed last and when.
+- If status is "WAITING FOR REPLY" (ball in prospect's court): do NOT recommend re-sending what was already said. Instead recommend: when to follow up if no reply, what to prepare in the meantime, and parallel actions. Give the prospect at least 1 business day to respond before suggesting any follow-up.
+- If status is "ACTION NEEDED" (ball in our court): recommend immediate response actions.
+- The draft_email should match the timing of your recommended actions:
+  - WAITING FOR REPLY: draft the follow-up email to send on the date you recommend following up (e.g. "Send this on Tue Mar 11 if no reply"). The email tone should assume the prospect hasn't responded yet — use phrases like "wanted to circle back", "following up on the contract I sent Monday". Do NOT write it as if sending today.
+  - ACTION NEEDED: draft an immediate response email.
+  - Never duplicate an email that was already sent.
+- Adjust urgency accordingly — "waiting for reply sent today" should be "this_week" not "immediate".
 ${topN ? `\nIMPORTANT: Only return the top ${topN} highest-priority deals. Do NOT return all deals.` : ""}
 
 IMPORTANT formatting rules:
@@ -95,6 +112,18 @@ IMPORTANT formatting rules:
                     maxItems: 3,
                     description: "Top 3 short signal phrases from emails/activities",
                   },
+                  current_stage: { type: "string", description: "Current pipeline stage name (copy from deal context)" },
+                  next_stage: { type: "string", description: "Next pipeline stage to push toward (copy from deal context, or 'Close - Won' if final stage)" },
+                  draft_email: {
+                    type: "object",
+                    properties: {
+                      send_date: { type: "string", description: "When to send this email. Use 'Today' if ACTION NEEDED, or a specific date like 'Tue Mar 11' if WAITING FOR REPLY. Match the follow-up timing from recommended_actions." },
+                      subject: { type: "string", description: "Email subject line — use Re: if continuing an existing thread" },
+                      body: { type: "string", description: "Short, direct email body (3-5 sentences max). Use the contact's first name. Reference specific details from the deal context. Push toward the next pipeline stage action. Sign off as Chris. If WAITING FOR REPLY, write this as a future follow-up (not to send today)." },
+                    },
+                    required: ["send_date", "subject", "body"],
+                    description: "Ready-to-send follow-up email draft for this deal",
+                  },
                   deal_history: {
                     type: "array",
                     items: {
@@ -118,6 +147,9 @@ IMPORTANT formatting rules:
                   "recommended_actions",
                   "reasoning",
                   "key_signals",
+                  "current_stage",
+                  "next_stage",
+                  "draft_email",
                   "deal_history",
                 ],
               },

@@ -8,7 +8,7 @@ import {
   getOrgName,
   type DealContact,
 } from "./pipedrive.js";
-import { getGmailClient, validateGmailCredentials, searchEmails } from "./gmail.js";
+import { getGmailClient, validateGmailCredentials, getGmailUserEmail, searchEmails } from "./gmail.js";
 import { analyzeDeals, type DealPriority } from "./claude.js";
 import { getEnv } from "./env.js";
 import type { gmail_v1 } from "googleapis";
@@ -115,6 +115,7 @@ async function enrichDeal(
   deal: DealItem,
   stages: Map<number, string>,
   gmail: gmail_v1.Gmail,
+  userEmail: string,
   emailDays: number,
   maxEmails: number,
 ): Promise<string> {
@@ -157,6 +158,22 @@ async function enrichDeal(
           .join("\n---\n")
       : "No email communication found.";
 
+  // Determine conversation status — who needs to act next?
+  let conversationStatus = "";
+  if (allEmails.length > 0) {
+    const latest = allEmails[0]; // emails are sorted newest first
+    const isOutbound = latest.from.toLowerCase().includes(userEmail.toLowerCase());
+    const emailDate = new Date(latest.date);
+    const daysSinceLastEmail = Math.floor((Date.now() - emailDate.getTime()) / 86_400_000);
+    const dateStr = emailDate.toISOString().split("T")[0];
+
+    if (isOutbound) {
+      conversationStatus = `\nConversation status: WAITING FOR REPLY — last email was outbound (from us) on ${dateStr} (${daysSinceLastEmail === 0 ? "today" : daysSinceLastEmail + "d ago"}). Ball is in prospect's court.`;
+    } else {
+      conversationStatus = `\nConversation status: ACTION NEEDED — last email was inbound (from prospect) on ${dateStr} (${daysSinceLastEmail === 0 ? "today" : daysSinceLastEmail + "d ago"}). Ball is in our court.`;
+    }
+  }
+
   // Format contacts with title/org
   const contactsList =
     contacts.map((c) => {
@@ -185,7 +202,7 @@ Organization: ${orgName ?? "Unknown"}
 Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
 Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
-${pipelineContext}
+${pipelineContext}${conversationStatus}
 
 Recent activities:
 ${activityList}
@@ -224,6 +241,7 @@ export async function analyzeDealPipeline(options: {
     getGmailClient(),
   ]);
   await validateGmailCredentials(gmail);
+  const userEmail = await getGmailUserEmail(gmail);
 
   // Fetch stages and deals in parallel
   const env = getEnv();
@@ -259,7 +277,7 @@ export async function analyzeDealPipeline(options: {
 
   // Enrich all deals concurrently (max CONCURRENCY at a time)
   const dealContexts = await runWithConcurrency(deals, CONCURRENCY, (deal) =>
-    enrichDeal(deal, stages, gmail, emailDays, maxEmails),
+    enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails),
   );
 
   // Send to Claude for analysis
@@ -284,13 +302,14 @@ export async function analyzeSingleDeal(options: {
     getGmailClient(),
   ]);
   await validateGmailCredentials(gmail);
+  const userEmail = await getGmailUserEmail(gmail);
 
   const [stages, deal] = await Promise.all([
     getStagesMap(),
     getDealById(options.dealId),
   ]);
 
-  const dealContext = await enrichDeal(deal, stages, gmail, emailDays, maxEmails);
+  const dealContext = await enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails);
   const analysis = await analyzeDeals(dealContext);
 
   return {

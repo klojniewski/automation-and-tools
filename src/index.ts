@@ -168,6 +168,7 @@ function printDealAnalysis(result: DealAnalysisResult) {
     console.log(`#${deal.priority_rank} [${healthIcon[deal.deal_health] ?? "   "}] ${deal.deal_title}`);
     console.log(`URL: ${pipedriveUrl}/${deal.deal_id}`);
     console.log(`Health: ${deal.deal_health.toUpperCase()} | Urgency: ${urgencyLabel[deal.urgency] ?? deal.urgency}`);
+    console.log(`Stage: ${deal.current_stage} → ${deal.next_stage}`);
 
     console.log("\nAction:");
     for (const action of deal.recommended_actions) {
@@ -185,6 +186,12 @@ function printDealAnalysis(result: DealAnalysisResult) {
         console.log(`  - ${signal}`);
       }
     }
+
+    console.log(`\nDraft Email (send: ${deal.draft_email.send_date}):`);
+    console.log(`  Subject: ${deal.draft_email.subject}`);
+    console.log(`  ---`);
+    console.log(`  ${deal.draft_email.body.split("\n").join("\n  ")}`);
+    console.log(`  ---`);
 
     if (deal.deal_history.length > 0) {
       console.log("\nDeal History:");
