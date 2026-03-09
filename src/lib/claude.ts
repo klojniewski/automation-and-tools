@@ -194,5 +194,12 @@ IMPORTANT formatting rules:
     deals = deals[0].deals;
   }
 
+  // Hard limit: Claude may ignore the topN instruction, so enforce it here
+  if (topN && deals.length > topN) {
+    deals = deals
+      .sort((a: any, b: any) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999))
+      .slice(0, topN);
+  }
+
   return DealPrioritySchema.parse({ deals });
 }
