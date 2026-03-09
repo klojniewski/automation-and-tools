@@ -1,31 +1,63 @@
 # Project: Marketing Automations
 
-Trigger.dev automation project for marketing scorecard, Gmail, and Pipedrive integrations.
+Trigger.dev automation project + local CLI for marketing scorecard, deal intelligence, Gmail, and Pipedrive integrations.
 Deployed on Trigger.dev (prod env).
 
 ## Architecture
 
 ### Stack
-- Runtime: Trigger.dev v4 (task scheduler)
+- Runtime: Trigger.dev v4 (task scheduler) + local CLI (Commander)
 - Language: TypeScript
-- APIs: Google Analytics (GA4), Google Sheets, YouTube Analytics, Pipedrive, Gmail
+- APIs: Google Analytics (GA4), Google Sheets, YouTube Analytics, Pipedrive, Gmail, Anthropic (Claude)
 - Config: `trigger.config.ts`, env vars via `src/lib/env.ts` (zod validated)
 
-### Task: update-scorecard
-- ID: `update-scorecard`
-- Schedule: weekly
-- Flow: parallel fetch GA4 + Pipedrive deals + YouTube views → aggregate → write to Google Sheet
-- Retry: max 2 attempts
-- Machine: micro, max 120s
+### Running Locally (CLI)
+
+All tasks can be run locally via the Commander CLI:
+
+```bash
+npx tsx src/index.ts <command>
+```
+
+**Deal intelligence:**
+- `analyze` — AI-powered deal prioritization with Gmail context
+  - Options: `--limit <n>`, `--email-days <n>`, `--max-emails <n>`
+
+**Marketing scorecard:**
+- `marketing getga4stats` — fetch weekly GA4 metrics
+- `marketing getpipedrivedeals` — fetch weekly Pipedrive deals count
+- `marketing getyoutubestats` — fetch weekly YouTube views
+- `marketing updateScorecard` — full scorecard update (all sources → Sheet)
+- All marketing commands support `--week <YYWW>` and `--dry-run`
+
+### Trigger.dev Tasks
+
+All task definitions live in `src/trigger/`:
+
+| Task ID | File | Machine | Schedule |
+|---------|------|---------|----------|
+| `update-scorecard` | `update-scorecard.ts` | micro, 120s | weekly |
+| `analyze-deals` | `analyze-deals.ts` | small-1x, 300s | on-demand |
+| `get-pipedrive-deals` | `get-pipedrive-deals.ts` | micro, 120s | on-demand |
+| `get-ga4-stats` | `get-ga4-stats.ts` | micro | on-demand |
+| `get-youtube-stats` | `get-youtube-stats.ts` | micro | on-demand |
+
+On-demand tasks can be triggered from the Trigger.dev dashboard or run locally via CLI.
 
 ### Directory Structure
+- `src/index.ts` — CLI entrypoint (Commander)
 - `src/trigger/` — Trigger.dev task definitions
 - `src/lib/` — shared business logic (auth, API wrappers, config)
 - `scripts/` — utility scripts (see Scripts section)
 
 ### Key Files
+- `src/index.ts` — CLI entrypoint (Commander)
 - `src/trigger/update-scorecard.ts` — weekly scorecard task
+- `src/trigger/analyze-deals.ts` — deal analysis task
+- `src/trigger/get-pipedrive-deals.ts` — Pipedrive deals task
 - `src/lib/scorecard.ts` — orchestration (GA4 + Pipedrive + YouTube → Sheets)
+- `src/lib/deal-analysis.ts` — deal analysis logic (uses Claude AI)
+- `src/lib/pipedrive.ts` / `src/lib/pipedrive-stats.ts` — Pipedrive API wrappers
 - `src/lib/google-auth.ts` — all Google auth clients
 - `src/lib/marketing-config.ts` — column mappings
 
