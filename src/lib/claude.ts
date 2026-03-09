@@ -37,7 +37,7 @@ export async function analyzeDeals(dealContexts: string, topN?: number): Promise
   const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
   const today = new Date().toISOString().split("T")[0];
   const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
+    model: "claude-sonnet-4-6",
     max_tokens: 12000,
     system: `Today's date: ${today}
 
@@ -50,7 +50,18 @@ Apply the Challenger Sales methodology:
 
 Factor in typical software consulting dynamics: scope creep risk, decision-by-committee, technical evaluation cycles, budget approval processes.
 
-Analyze these CRM deals and their email communication history. Rank deals by priority (1 = most urgent). Consider: staleness of communication, deal value, deal stage, email sentiment, and whether the contact is responsive.
+Analyze these CRM deals and their email communication history.
+
+RANKING RULES — rank by "where should I spend my time today", NOT by proximity to close:
+1. ACTION NEEDED + high risk of loss (frustrated client, deal going cold, deadline today) = rank highest
+2. ACTION NEEDED + time-sensitive window (prospect promised decision today, reply expected) = rank high
+3. ACTION NEEDED + high value early-stage (need to maintain momentum after recent call/meeting) = rank medium
+4. WAITING FOR REPLY (recently sent, <2 days ago) = rank LOW regardless of deal value or stage — nothing to do today
+5. WAITING FOR REPLY (3+ days, no response) = rank medium — time to follow up
+
+Deals where you sent an email today or yesterday and are waiting for a reply should NEVER be #1 — there is no action to take. These are "monitor" deals.
+
+A £15K deal at final stage where contract was just sent today is LESS urgent than a £32K deal where the client is frustrated and you haven't replied in a week.
 
 Each deal includes its current pipeline stage, what's needed to advance, and what the next stage requires. Use this to make recommended_actions specific to advancing the deal to the next stage. Focus on concrete actions that move the deal forward in the pipeline, not generic sales advice.
 
