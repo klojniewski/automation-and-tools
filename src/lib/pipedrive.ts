@@ -4,6 +4,7 @@ import {
   PersonsApi,
   ActivitiesApi,
   StagesApi,
+  OrganizationsApi,
 } from "pipedrive/v2";
 import type { DealItem } from "pipedrive/v2";
 import { getEnv } from "./env.js";
@@ -60,6 +61,8 @@ export interface DealContact {
   id: number;
   name: string;
   email: string | null;
+  title: string | null;
+  orgName: string | null;
 }
 
 export async function getDealContacts(
@@ -74,7 +77,19 @@ export async function getDealContacts(
       person.emails?.find((e) => e.primary)?.value ??
       person.emails?.[0]?.value ??
       null,
+    title: (person as any).job_title ?? null,
+    orgName: (person as any).org_name ?? null,
   }));
+}
+
+export async function getOrgName(orgId: number): Promise<string | null> {
+  try {
+    const orgsApi = new OrganizationsApi(createConfig());
+    const response = await orgsApi.getOrganization({ id: orgId });
+    return response.data?.name ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getDealActivities(dealId: number, limit = 5) {

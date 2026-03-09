@@ -31,8 +31,7 @@ export async function searchEmails(
       const detail = await gmail.users.messages.get({
         userId: "me",
         id: msg.id!,
-        format: "metadata",
-        metadataHeaders: ["From", "To", "Subject", "Date"],
+        format: "full",
       });
       const headers = detail.data.payload?.headers ?? [];
       const getHeader = (name: string) =>
@@ -44,9 +43,61 @@ export async function searchEmails(
         subject: getHeader("Subject"),
         date: getHeader("Date"),
         snippet: detail.data.snippet ?? "",
+        body: extractTextBody(detail.data.payload),
       };
     }),
   );
 
   return details;
+}
+
+function extractTextBody(payload: any): string {
+  if (!payload) return "";
+
+  // Direct text/plain body
+  if (payload.mimeType === "text/plain" && payload.body?.data) {
+    return decodeBase64(payload.body.data);
+  }
+
+  // Multipart — find text/plain part
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/plain" && part.body?.data) {
+        return decodeBase64(part.body.data);
+      }
+      // Nested multipart
+      if (part.parts) {
+        const nested = extractTextBody(part);
+        if (nested) return nested;
+      }
+    }
+    // Fallback to text/html if no plain text
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/html" && part.body?.data) {
+        return stripHtml(decodeBase64(part.body.data));
+      }
+    }
+  }
+
+  return "";
+}
+
+function decodeBase64(data: string): string {
+  return Buffer.from(data, "base64url").toString("utf-8");
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

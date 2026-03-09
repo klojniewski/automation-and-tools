@@ -5,6 +5,7 @@ import {
   getDealContacts,
   getDealActivities,
   getStagesMap,
+  getOrgName,
   type DealContact,
 } from "./pipedrive.js";
 import { getGmailClient, validateGmailCredentials, searchEmails } from "./gmail.js";
@@ -14,6 +15,77 @@ import type { gmail_v1 } from "googleapis";
 import type { DealItem } from "pipedrive/v2";
 
 const CONCURRENCY = 5;
+
+// Pipeline stage definitions with exit criteria (matches docs/Pagepro Inbound Sales Process.md)
+interface StageDefinition {
+  name: string;
+  trigger: string;
+  exitCriteria: string;
+}
+
+const PIPELINE_STAGES: StageDefinition[] = [
+  {
+    name: "Lead In",
+    trigger: "Inbound enquiry via website/contact form",
+    exitCriteria: "Respond within 15 min. Book and complete an Intro Meeting (understand project, share case studies, provide ballpark costs). Move to next stage once Intro Meeting is done.",
+  },
+  {
+    name: "Qualification Call Made",
+    trigger: "Intro Meeting completed",
+    exitCriteria: "Qualify prospect using BANT (Budget, Authority, Need, Timeline). Log call transcript, create CRM note with summary. Send follow-up email same day. Move when all four BANT conditions are confirmed.",
+  },
+  {
+    name: "Deal Qualified",
+    trigger: "All BANT criteria met (budget confirmed, decision maker identified, project fits our stack, timeline known)",
+    exitCriteria: "Deep-dive into requirements. Produce a Project Concept document (current situation, desired outcome, proposed approach, precise estimate). Move when concept is ready to present.",
+  },
+  {
+    name: "Situation Investigated",
+    trigger: "Project Concept prepared",
+    exitCriteria: "Present concept to client. Get explicit approval of concept and ballpark before proceeding. Do NOT proceed to proposal until concept is approved.",
+  },
+  {
+    name: "Concept Confirmed",
+    trigger: "Client explicitly approves concept and ballpark",
+    exitCriteria: "Produce detailed proposal. Present live in a meeting OR record walkthrough video. Collect feedback and iterate. Move when proposal is sent.",
+  },
+  {
+    name: "Proposal Sent",
+    trigger: "Proposal sent to client",
+    exitCriteria: "Collect feedback, iterate if needed. Once proposal is accepted by client, send contract/agreement. Move when agreement is sent.",
+  },
+  {
+    name: "Agreement Sent",
+    trigger: "Proposal accepted, contract sent to client",
+    exitCriteria: "Negotiate terms if needed. Deal is WON when contract is signed by both parties. Mark Won in CRM, complete notes, hand off to delivery.",
+  },
+];
+
+export function getStagePipelineContext(stageName: string): string {
+  const stageIndex = PIPELINE_STAGES.findIndex(
+    (s) => s.name.toLowerCase() === stageName.toLowerCase(),
+  );
+
+  if (stageIndex === -1) return "";
+
+  const current = PIPELINE_STAGES[stageIndex];
+  const next = PIPELINE_STAGES[stageIndex + 1];
+  const totalStages = PIPELINE_STAGES.length;
+
+  let context = `\nPipeline position: Stage ${stageIndex + 1} of ${totalStages}`;
+  context += `\nCurrent stage: ${current.name}`;
+  context += `\n  Trigger: ${current.trigger}`;
+  context += `\n  To advance: ${current.exitCriteria}`;
+
+  if (next) {
+    context += `\nNext stage: ${next.name}`;
+    context += `\n  Requires: ${next.trigger}`;
+  } else {
+    context += `\nThis is the final stage before Close - Won.`;
+  }
+
+  return context;
+}
 
 export interface DealAnalysisResult {
   dealsAnalyzed: number;
@@ -48,10 +120,11 @@ async function enrichDeal(
 ): Promise<string> {
   const dealId = deal.id ?? 0;
 
-  // Fetch contacts and activities in parallel
-  const [contacts, activities] = await Promise.all([
+  // Fetch contacts, activities, and org name in parallel
+  const [contacts, activities, orgName] = await Promise.all([
     getDealContacts(dealId).catch((): DealContact[] => []),
-    getDealActivities(dealId, 5).catch((): any[] => []),
+    getDealActivities(dealId, 10).catch((): any[] => []),
+    deal.org_id ? getOrgName(deal.org_id) : Promise.resolve(null),
   ]);
 
   const stageName = stages.get(deal.stage_id ?? 0) ?? `Stage ${deal.stage_id}`;
@@ -73,28 +146,64 @@ async function enrichDeal(
   );
   const allEmails = emailResults.flat();
 
+  // Format email with full body (truncated to keep context manageable)
   const emailSummary =
     allEmails.length > 0
       ? allEmails
-          .map((e) => `[${e.date}] ${e.from} -> ${e.to} | Subject: ${e.subject} | ${e.snippet} | Link: https://mail.google.com/mail/u/0/#inbox/${e.id}`)
-          .join("\n")
+          .map((e) => {
+            const body = e.body ? `\n${e.body.slice(0, 500)}` : e.snippet;
+            return `[${e.date}] ${e.from} -> ${e.to} | Subject: ${e.subject} | Link: https://mail.google.com/mail/u/0/#inbox/${e.id}\n${body}`;
+          })
+          .join("\n---\n")
       : "No email communication found.";
 
+  // Format contacts with title/org
   const contactsList =
-    contacts.map((c) => `${c.name} <${c.email ?? "no email"}>`).join(", ") || "None";
+    contacts.map((c) => {
+      const parts = [c.name];
+      if (c.title) parts.push(`(${c.title})`);
+      if (c.orgName) parts.push(`at ${c.orgName}`);
+      parts.push(`<${c.email ?? "no email"}>`);
+      return parts.join(" ");
+    }).join(", ") || "None";
 
+  // Format activities with notes
   const activityList =
     activities.length > 0
-      ? activities.map((a: any) => `${a.type}: ${a.subject} (${a.due_date})`).join("; ")
+      ? activities.map((a: any) => {
+          const note = a.note ? ` — ${stripActivityHtml(a.note).slice(0, 200)}` : "";
+          return `[${a.due_date}] ${a.type}: ${a.subject}${note}`;
+        }).join("\n")
       : "None";
 
+  const today = new Date().toISOString().split("T")[0];
+
+  const pipelineContext = getStagePipelineContext(stageName);
+
   return `DEAL #${dealId}: ${deal.title}
-Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Days since update: ${daysSinceUpdate}
+Organization: ${orgName ?? "Unknown"}
+Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
+Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
-Recent activities: ${activityList}
+${pipelineContext}
+
+Recent activities:
+${activityList}
+
 Email history (last ${emailDays} days):
 ${emailSummary}
 ---`;
+}
+
+function stripActivityHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export async function analyzeDealPipeline(options: {

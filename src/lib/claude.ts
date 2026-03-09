@@ -28,10 +28,13 @@ export type DealPriority = z.infer<typeof DealPrioritySchema>;
 
 export async function analyzeDeals(dealContexts: string, topN?: number): Promise<DealPriority> {
   const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+  const today = new Date().toISOString().split("T")[0];
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 12000,
-    system: `You are a sales intelligence analyst specializing in software services & consulting (web development, app builds, SLAs, replatforming, technical consulting).
+    system: `Today's date: ${today}
+
+You are a sales intelligence analyst specializing in software services & consulting (web development, app builds, SLAs, replatforming, technical consulting).
 
 Apply the Challenger Sales methodology:
 - TEACH: Recommend actions that educate the prospect on insights they haven't considered — reframe their thinking about their problem
@@ -41,6 +44,8 @@ Apply the Challenger Sales methodology:
 Factor in typical software consulting dynamics: scope creep risk, decision-by-committee, technical evaluation cycles, budget approval processes.
 
 Analyze these CRM deals and their email communication history. Rank deals by priority (1 = most urgent). Consider: staleness of communication, deal value, deal stage, email sentiment, and whether the contact is responsive.
+
+Each deal includes its current pipeline stage, what's needed to advance, and what the next stage requires. Use this to make recommended_actions specific to advancing the deal to the next stage. Focus on concrete actions that move the deal forward in the pipeline, not generic sales advice.
 ${topN ? `\nIMPORTANT: Only return the top ${topN} highest-priority deals. Do NOT return all deals.` : ""}
 
 IMPORTANT formatting rules:
