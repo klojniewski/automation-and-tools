@@ -24,7 +24,7 @@ export const DealPrioritySchema = z.object({
         z.object({
           date: z.string(),
           summary: z.string(),
-          email_link: z.string().optional(),
+          email_link: z.string().nullable().optional(),
         }),
       ),
     }),
