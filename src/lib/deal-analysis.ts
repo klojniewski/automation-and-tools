@@ -8,11 +8,13 @@ import {
   getOrgName,
   getTimelineNote,
   upsertTimelineNote,
-  formatTimelineHtml,
+  formatFullTimelineHtml,
+  appendToTimelineHtml,
+  parseTimelineHtml,
   type DealContact,
 } from "./pipedrive.js";
 import { getGmailClient, validateGmailCredentials, getGmailUserEmail, searchEmails } from "./gmail.js";
-import { analyzeDeals, type DealPriority } from "./claude.js";
+import { analyzeDeals, buildTimeline, type DealPriority, type Timeline } from "./claude.js";
 import { getEnv } from "./env.js";
 import type { gmail_v1 } from "googleapis";
 import type { DealItem } from "pipedrive/v2";
@@ -292,20 +294,29 @@ export async function analyzeDealPipeline(options: {
   // Send to Claude for analysis
   const analysis = await analyzeDeals(dealContexts.join("\n\n"), options.top);
 
-  // Write TIMELINE notes back to Pipedrive for each analyzed deal
+  // Append-only update to existing TIMELINE notes (header + new log entries)
   await Promise.all(
-    analysis.deals.map((d) => {
-      const html = formatTimelineHtml(
-        d.deal_title,
-        d.deal_history.map((h) => ({ date: h.date, summary: h.summary })),
-        d.current_stage,
-        d.next_stage,
-        d.deal_health,
-        d.urgency,
-      );
-      return upsertTimelineNote(d.deal_id, html).catch((err) =>
-        console.error(`Failed to write TIMELINE for deal ${d.deal_id}:`, err),
-      );
+    analysis.deals.map(async (d) => {
+      try {
+        const existing = await getTimelineNote(d.deal_id).catch(() => null);
+        if (!existing || !parseTimelineHtml(existing.content)) {
+          // No existing TIMELINE — skip, user should run build-timeline first
+          return;
+        }
+        const updated = appendToTimelineHtml(
+          existing.content,
+          d.deal_history.map((h) => ({ date: h.date, summary: h.summary, email_link: h.email_link })),
+          {
+            stage: d.current_stage,
+            nextStage: d.next_stage,
+            health: d.deal_health,
+            currentStatus: d.reasoning.join("; "),
+          },
+        );
+        await upsertTimelineNote(d.deal_id, updated);
+      } catch (err) {
+        console.error(`Failed to update TIMELINE for deal ${d.deal_id}:`, err);
+      }
     }),
   );
 
@@ -338,20 +349,24 @@ export async function analyzeSingleDeal(options: {
   const dealContext = await enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails);
   const analysis = await analyzeDeals(dealContext);
 
-  // Write TIMELINE note back to Pipedrive
+  // Append-only update to existing TIMELINE note
   for (const d of analysis.deals) {
     try {
-      const html = formatTimelineHtml(
-        d.deal_title,
-        d.deal_history.map((h) => ({ date: h.date, summary: h.summary })),
-        d.current_stage,
-        d.next_stage,
-        d.deal_health,
-        d.urgency,
+      const existing = await getTimelineNote(d.deal_id).catch(() => null);
+      if (!existing || !parseTimelineHtml(existing.content)) continue;
+      const updated = appendToTimelineHtml(
+        existing.content,
+        d.deal_history.map((h) => ({ date: h.date, summary: h.summary, email_link: h.email_link })),
+        {
+          stage: d.current_stage,
+          nextStage: d.next_stage,
+          health: d.deal_health,
+          currentStatus: d.reasoning.join("; "),
+        },
       );
-      await upsertTimelineNote(d.deal_id, html);
+      await upsertTimelineNote(d.deal_id, updated);
     } catch (err) {
-      console.error(`Failed to write TIMELINE for deal ${d.deal_id}:`, err);
+      console.error(`Failed to update TIMELINE for deal ${d.deal_id}:`, err);
     }
   }
 
@@ -359,4 +374,45 @@ export async function analyzeSingleDeal(options: {
     dealsAnalyzed: 1,
     analysis,
   };
+}
+
+export async function buildDealTimeline(options: {
+  dealId: number;
+  emailDays?: number;
+  maxEmails?: number;
+}): Promise<Timeline> {
+  const emailDays = options.emailDays ?? 365;
+  const maxEmails = options.maxEmails ?? 50;
+
+  const [, gmail] = await Promise.all([
+    validateCredentials(),
+    getGmailClient(),
+  ]);
+  await validateGmailCredentials(gmail);
+  const userEmail = await getGmailUserEmail(gmail);
+
+  const [stages, deal] = await Promise.all([
+    getStagesMap(),
+    getDealById(options.dealId),
+  ]);
+
+  const dealContext = await enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails);
+  const timeline = await buildTimeline(dealContext);
+
+  // Full rewrite of TIMELINE note
+  const html = formatFullTimelineHtml({
+    dealTitle: timeline.deal_title,
+    value: timeline.value,
+    contact: timeline.contact,
+    currentStatus: timeline.current_status,
+    milestones: timeline.milestones,
+    detailedLog: timeline.detailed_log,
+    stage: timeline.current_stage,
+    nextStage: timeline.next_stage,
+    health: timeline.deal_health,
+  });
+  await upsertTimelineNote(options.dealId, html);
+  console.error(`Wrote TIMELINE note for deal ${options.dealId}`);
+
+  return timeline;
 }

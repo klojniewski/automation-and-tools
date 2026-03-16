@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { analyzeDealPipeline, analyzeSingleDeal } from "./lib/deal-analysis.js";
+import { analyzeDealPipeline, analyzeSingleDeal, buildDealTimeline } from "./lib/deal-analysis.js";
 import type { DealAnalysisResult } from "./lib/deal-analysis.js";
 import { getGA4Stats } from "./lib/ga4-stats.js";
 import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
@@ -54,6 +54,46 @@ program
         maxEmails: parseInt(opts.maxEmails),
       });
       printDealAnalysis(result);
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("build-timeline <id>")
+  .description("Build a comprehensive TIMELINE note for a deal (full history)")
+  .option("--email-days <n>", "Email history window in days", "365")
+  .option("--max-emails <n>", "Max emails per contact", "50")
+  .action(async (id: string, opts) => {
+    try {
+      const timeline = await buildDealTimeline({
+        dealId: parseInt(id),
+        emailDays: parseInt(opts.emailDays),
+        maxEmails: parseInt(opts.maxEmails),
+      });
+      console.log(`\n========================================`);
+      console.log(`  TIMELINE: ${timeline.deal_title}`);
+      console.log(`  Value: ${timeline.value} | Contact: ${timeline.contact}`);
+      console.log(`  Stage: ${timeline.current_stage} → ${timeline.next_stage}`);
+      console.log(`  Health: ${timeline.deal_health.toUpperCase()}`);
+      console.log(`========================================`);
+      console.log(`\n  Status: ${timeline.current_status}\n`);
+
+      console.log(`  KEY MILESTONES:`);
+      for (const entry of timeline.milestones) {
+        const link = entry.email_link ? ` ${entry.email_link}` : "";
+        console.log(`  [${entry.date}] ${entry.summary}${link}`);
+      }
+
+      console.log(`\n  DETAILED LOG:`);
+      for (const entry of timeline.detailed_log) {
+        const link = entry.email_link ? ` ${entry.email_link}` : "";
+        console.log(`  [${entry.date}] ${entry.summary}${link}`);
+      }
+
+      const total = timeline.milestones.length + timeline.detailed_log.length;
+      console.log(`\n  (${timeline.milestones.length} milestones + ${timeline.detailed_log.length} log entries = ${total} events — written to Pipedrive)\n`);
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);

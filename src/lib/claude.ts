@@ -33,6 +33,28 @@ export const DealPrioritySchema = z.object({
 
 export type DealPriority = z.infer<typeof DealPrioritySchema>;
 
+export const TimelineEntrySchema = z.object({
+  date: z.string(),
+  summary: z.string(),
+  email_link: z.string().nullable().optional(),
+});
+
+export const TimelineSchema = z.object({
+  deal_id: z.number(),
+  deal_title: z.string(),
+  value: z.string(),
+  contact: z.string(),
+  current_status: z.string(),
+  milestones: z.array(TimelineEntrySchema),
+  detailed_log: z.array(TimelineEntrySchema),
+  current_stage: z.string(),
+  next_stage: z.string(),
+  deal_health: z.enum(["hot", "warm", "cold", "at_risk"]),
+});
+
+export type TimelineEntry = z.infer<typeof TimelineEntrySchema>;
+export type Timeline = z.infer<typeof TimelineSchema>;
+
 export async function analyzeDeals(dealContexts: string, topN?: number): Promise<DealPriority> {
   const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
   const today = new Date().toISOString().split("T")[0];
@@ -80,7 +102,7 @@ IMPORTANT formatting rules:
 - Return concise bullet points, NOT full sentences
 - Each bullet should be a scannable phrase (e.g. "£15.6K value, strong momentum" not "The deal value is £15.6K and there is strong momentum")
 - LIMIT: max 3 items per recommended_actions, reasoning, and key_signals — pick only the most impactful
-- For deal_history: extract the 5 most recent actions/activities/emails from the deal context, return in reverse chronological order (latest first), each with a short date and one-line summary`,
+- For deal_history: extract the 5 most recent actions/activities/emails from the deal context, return in reverse chronological order (latest first), each with an ISO date (YYYY-MM-DD) and one-line summary`,
     messages: [{ role: "user", content: dealContexts }],
     tools: [
       {
@@ -140,7 +162,7 @@ IMPORTANT formatting rules:
                     items: {
                       type: "object",
                       properties: {
-                        date: { type: "string", description: "Short date like 'Feb 5' or 'Jan 30'" },
+                        date: { type: "string", description: "ISO date like '2026-03-13'" },
                         summary: { type: "string", description: "One short sentence summarizing the action" },
                         email_link: { type: "string", description: "Gmail link if this entry is from an email (copy the Link: URL from the email history). Omit if not from email." },
                       },
@@ -213,4 +235,87 @@ IMPORTANT formatting rules:
   }
 
   return DealPrioritySchema.parse({ deals });
+}
+
+export async function buildTimeline(dealContext: string): Promise<Timeline> {
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+  const today = new Date().toISOString().split("T")[0];
+
+  const timelineEntrySchema = {
+    type: "object" as const,
+    properties: {
+      date: { type: "string" as const, description: "ISO date like '2026-03-13'" },
+      summary: { type: "string" as const, description: "One-line summary of the event" },
+      email_link: { type: "string" as const, description: "Gmail link if from email. Omit if not." },
+    },
+    required: ["date", "summary"],
+  };
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 10000,
+    system: `Today's date: ${today}
+
+You are a sales intelligence analyst. Build a comprehensive timeline for this deal.
+
+OUTPUT TWO SEPARATE LISTS:
+
+1. MILESTONES (10-15 max) — only stage-advancing, deal-changing events:
+   - First contact, discovery calls, proposals sent/accepted, contracts sent/signed
+   - Key decisions, pricing agreements, scope changes
+   - Latest first. Include email_link when available.
+   - These are the "permanent record" — the events a new person needs to understand the deal.
+
+2. DETAILED LOG — all other meaningful events, FILTERED:
+   - Include: follow-ups, status updates, scheduling, introductions, negotiation points
+   - EXCLUDE: acknowledgement replies ("no problem", "thanks", "sounds good"), calendar invite accepts, CRM "Follow Up deadline logged" reminders, trivial confirmations
+   - Latest first. Include email_link when available.
+
+Also provide:
+- value: deal value as shown (e.g. "£15,600")
+- contact: primary contact name and company (e.g. "Shane (Codeforge)")
+- current_status: 1-2 sentence summary of where the deal stands RIGHT NOW and what's blocking progress`,
+    messages: [{ role: "user", content: dealContext }],
+    tools: [
+      {
+        name: "deal_timeline",
+        description: "Structured timeline with milestones and detailed log",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            deal_id: { type: "number" },
+            deal_title: { type: "string" },
+            value: { type: "string", description: "Deal value e.g. '£15,600'" },
+            contact: { type: "string", description: "Primary contact e.g. 'Shane (Codeforge)'" },
+            current_status: { type: "string", description: "1-2 sentences: where the deal stands now and what's blocking" },
+            milestones: {
+              type: "array",
+              items: timelineEntrySchema,
+              description: "10-15 key stage-advancing events, latest first",
+            },
+            detailed_log: {
+              type: "array",
+              items: timelineEntrySchema,
+              description: "All other meaningful events (filtered), latest first",
+            },
+            current_stage: { type: "string" },
+            next_stage: { type: "string" },
+            deal_health: {
+              type: "string",
+              enum: ["hot", "warm", "cold", "at_risk"],
+            },
+          },
+          required: ["deal_id", "deal_title", "value", "contact", "current_status", "milestones", "detailed_log", "current_stage", "next_stage", "deal_health"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "deal_timeline" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("No structured response from Claude");
+
+  return TimelineSchema.parse(toolBlock.input);
 }

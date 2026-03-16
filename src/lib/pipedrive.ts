@@ -211,24 +211,140 @@ export async function upsertTimelineNote(
   }
 }
 
-export function formatTimelineHtml(
-  dealTitle: string,
-  entries: { date: string; summary: string }[],
-  stage: string,
-  nextStage: string,
-  health: string,
-  urgency: string,
-): string {
-  const now = new Date().toISOString().split("T")[0];
-  const entryLines = entries
-    .map((e) => `<b>[${e.date}]</b> ${e.summary}`)
-    .join("<br>");
+interface TimelineEntry {
+  date: string;
+  summary: string;
+  email_link?: string | null;
+}
 
-  return `${TIMELINE_MARKER} — ${dealTitle}<br>
+export function formatFullTimelineHtml(options: {
+  dealTitle: string;
+  value: string;
+  contact: string;
+  currentStatus: string;
+  milestones: TimelineEntry[];
+  detailedLog: TimelineEntry[];
+  stage: string;
+  nextStage: string;
+  health: string;
+}): string {
+  const now = new Date().toISOString().split("T")[0];
+
+  const formatEntry = (e: TimelineEntry) => {
+    const link = e.email_link ? ` <a href="${e.email_link}">📧</a>` : "";
+    return `<b>[${e.date}]</b> ${e.summary}${link}`;
+  };
+
+  const milestoneLines = options.milestones.map(formatEntry).join("<br>");
+  const logLines = options.detailedLog.map(formatEntry).join("<br>");
+
+  return `${TIMELINE_MARKER} — ${options.dealTitle}<br>
 <b>Last AI update:</b> ${now}<br>
-<b>Stage:</b> ${stage} → ${nextStage}<br>
-<b>Health:</b> ${health.toUpperCase()} | <b>Urgency:</b> ${urgency.toUpperCase()}<br>
+<b>Value:</b> ${options.value} | <b>Contact:</b> ${options.contact}<br>
+<b>Stage:</b> ${options.stage} → ${options.nextStage} | <b>Health:</b> ${options.health.toUpperCase()}<br>
 <br>
-<b>Key Events:</b><br>
-${entryLines}`;
+<b>Status:</b> ${options.currentStatus}<br>
+<br>
+<b>KEY MILESTONES:</b><br>
+${milestoneLines}<br>
+<br>
+<b>DETAILED LOG:</b><br>
+${logLines}`;
+}
+
+/**
+ * Parse an existing TIMELINE note HTML into its sections.
+ * Returns null if the note doesn't have the expected structure.
+ */
+export function parseTimelineHtml(html: string): {
+  header: string;
+  milestones: string[];
+  detailedLog: string[];
+} | null {
+  if (!html.includes(TIMELINE_MARKER)) return null;
+
+  const milestonesMatch = html.indexOf("<b>KEY MILESTONES:</b>");
+  const logMatch = html.indexOf("<b>DETAILED LOG:</b>");
+
+  if (milestonesMatch === -1 || logMatch === -1) return null;
+
+  const header = html.slice(0, milestonesMatch);
+  const milestonesSection = html.slice(milestonesMatch + "<b>KEY MILESTONES:</b><br>".length, logMatch);
+  const logSection = html.slice(logMatch + "<b>DETAILED LOG:</b><br>".length);
+
+  const parseEntries = (section: string) =>
+    section
+      .split("<br>")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("<b>["));
+
+  return {
+    header,
+    milestones: parseEntries(milestonesSection),
+    detailedLog: parseEntries(logSection),
+  };
+}
+
+/**
+ * Update the TIMELINE header and append new log entries.
+ * Milestones are never touched — only build-timeline sets them.
+ */
+export function appendToTimelineHtml(
+  existingHtml: string,
+  newEntries: TimelineEntry[],
+  headerUpdates: {
+    stage: string;
+    nextStage: string;
+    health: string;
+    currentStatus: string;
+  },
+): string {
+  const parsed = parseTimelineHtml(existingHtml);
+  if (!parsed) return existingHtml; // Can't parse — don't corrupt it
+
+  const now = new Date().toISOString().split("T")[0];
+
+  // Update header fields
+  let header = parsed.header;
+  header = header.replace(
+    /<b>Last AI update:<\/b>[^<]*/,
+    `<b>Last AI update:</b> ${now}`,
+  );
+  header = header.replace(
+    /<b>Stage:<\/b>[^<]*/,
+    `<b>Stage:</b> ${headerUpdates.stage} → ${headerUpdates.nextStage} | <b>Health:</b> ${headerUpdates.health.toUpperCase()}`,
+  );
+  // Update or add status line
+  if (header.includes("<b>Status:</b>")) {
+    header = header.replace(
+      /<b>Status:<\/b>[^<]*/,
+      `<b>Status:</b> ${headerUpdates.currentStatus}`,
+    );
+  }
+
+  // Dedup new entries against existing log
+  const existingLogText = parsed.detailedLog.join("\n");
+  const formatEntry = (e: TimelineEntry) => {
+    const link = e.email_link ? ` <a href="${e.email_link}">📧</a>` : "";
+    return `<b>[${e.date}]</b> ${e.summary}${link}`;
+  };
+
+  const deduped = newEntries.filter((entry) => {
+    // Check if a similar entry already exists (same date + similar text)
+    const datePart = `[${entry.date}]`;
+    const summaryWords = entry.summary.toLowerCase().split(/\s+/).slice(0, 4).join(" ");
+    return !existingLogText.includes(datePart) ||
+      !existingLogText.toLowerCase().includes(summaryWords);
+  });
+
+  const newLines = deduped.map(formatEntry);
+
+  // Prepend new entries (latest first) to existing log
+  const allLogLines = [...newLines, ...parsed.detailedLog];
+
+  return `${header}<b>KEY MILESTONES:</b><br>
+${parsed.milestones.join("<br>")}<br>
+<br>
+<b>DETAILED LOG:</b><br>
+${allLogLines.join("<br>")}`;
 }
