@@ -252,7 +252,7 @@ IMPORTANT formatting rules:
   fs.writeFileSync(`${dir}/06-claude-prompt.md`, `# Full Claude API Call
 
 ## Model
-\`claude-haiku-4-5-20251001\`
+\`claude-sonnet-4-6\`
 
 ## Max Tokens
 \`12000\`
