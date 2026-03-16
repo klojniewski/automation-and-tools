@@ -12,6 +12,7 @@ import {
   getDealActivities,
   getStagesMap,
   getOrgName,
+  getTimelineNote,
 } from "../src/lib/pipedrive.js";
 import { getGmailClient, validateGmailCredentials, getGmailUserEmail, searchEmails } from "../src/lib/gmail.js";
 import { analyzeDeals } from "../src/lib/claude.js";
@@ -47,11 +48,12 @@ async function main() {
   const userEmail = await getGmailUserEmail(gmail);
 
   // Fetch all raw data
-  const [stages, deal, contacts, activities] = await Promise.all([
+  const [stages, deal, contacts, activities, timelineNote] = await Promise.all([
     getStagesMap(),
     getDealById(dealId),
     getDealContacts(dealId).catch(() => []),
     getDealActivities(dealId, 10).catch(() => []),
+    getTimelineNote(dealId).catch(() => null),
   ]);
 
   const orgName = deal.org_id ? await getOrgName(deal.org_id) : null;
@@ -197,12 +199,16 @@ ${JSON.stringify(a, null, 2)}
     }
   }
 
+  const timelineSection = timelineNote
+    ? `\nPrevious timeline notes:\n${stripHtml(timelineNote.content)}`
+    : "";
+
   const enrichedContext = `DEAL #${dealId}: ${deal.title}
 Organization: ${orgName ?? "Unknown"}
 Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
 Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
-${pipelineContext}${conversationStatus}
+${pipelineContext}${conversationStatus}${timelineSection}
 
 Recent activities:
 ${activityList}

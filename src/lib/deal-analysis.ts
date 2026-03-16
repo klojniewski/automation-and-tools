@@ -6,6 +6,9 @@ import {
   getDealActivities,
   getStagesMap,
   getOrgName,
+  getTimelineNote,
+  upsertTimelineNote,
+  formatTimelineHtml,
   type DealContact,
 } from "./pipedrive.js";
 import { getGmailClient, validateGmailCredentials, getGmailUserEmail, searchEmails } from "./gmail.js";
@@ -121,11 +124,12 @@ async function enrichDeal(
 ): Promise<string> {
   const dealId = deal.id ?? 0;
 
-  // Fetch contacts, activities, and org name in parallel
-  const [contacts, activities, orgName] = await Promise.all([
+  // Fetch contacts, activities, org name, and timeline note in parallel
+  const [contacts, activities, orgName, timelineNote] = await Promise.all([
     getDealContacts(dealId).catch((): DealContact[] => []),
     getDealActivities(dealId, 10).catch((): any[] => []),
     deal.org_id ? getOrgName(deal.org_id) : Promise.resolve(null),
+    getTimelineNote(dealId).catch(() => null),
   ]);
 
   const stageName = stages.get(deal.stage_id ?? 0) ?? `Stage ${deal.stage_id}`;
@@ -197,12 +201,17 @@ async function enrichDeal(
 
   const pipelineContext = getStagePipelineContext(stageName);
 
+  // Parse timeline note (strip HTML for Claude context)
+  const timelineSection = timelineNote
+    ? `\nPrevious timeline notes:\n${stripActivityHtml(timelineNote.content)}`
+    : "";
+
   return `DEAL #${dealId}: ${deal.title}
 Organization: ${orgName ?? "Unknown"}
 Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
 Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
-${pipelineContext}${conversationStatus}
+${pipelineContext}${conversationStatus}${timelineSection}
 
 Recent activities:
 ${activityList}
@@ -283,6 +292,23 @@ export async function analyzeDealPipeline(options: {
   // Send to Claude for analysis
   const analysis = await analyzeDeals(dealContexts.join("\n\n"), options.top);
 
+  // Write TIMELINE notes back to Pipedrive for each analyzed deal
+  await Promise.all(
+    analysis.deals.map((d) => {
+      const html = formatTimelineHtml(
+        d.deal_title,
+        d.deal_history.map((h) => ({ date: h.date, summary: h.summary })),
+        d.current_stage,
+        d.next_stage,
+        d.deal_health,
+        d.urgency,
+      );
+      return upsertTimelineNote(d.deal_id, html).catch((err) =>
+        console.error(`Failed to write TIMELINE for deal ${d.deal_id}:`, err),
+      );
+    }),
+  );
+
   return {
     dealsAnalyzed: deals.length,
     analysis,
@@ -311,6 +337,23 @@ export async function analyzeSingleDeal(options: {
 
   const dealContext = await enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails);
   const analysis = await analyzeDeals(dealContext);
+
+  // Write TIMELINE note back to Pipedrive
+  for (const d of analysis.deals) {
+    try {
+      const html = formatTimelineHtml(
+        d.deal_title,
+        d.deal_history.map((h) => ({ date: h.date, summary: h.summary })),
+        d.current_stage,
+        d.next_stage,
+        d.deal_health,
+        d.urgency,
+      );
+      await upsertTimelineNote(d.deal_id, html);
+    } catch (err) {
+      console.error(`Failed to write TIMELINE for deal ${d.deal_id}:`, err);
+    }
+  }
 
   return {
     dealsAnalyzed: 1,

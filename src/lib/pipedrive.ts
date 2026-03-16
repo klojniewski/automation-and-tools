@@ -7,10 +7,18 @@ import {
   OrganizationsApi,
 } from "pipedrive/v2";
 import type { DealItem } from "pipedrive/v2";
+import {
+  Configuration as V1Configuration,
+  NotesApi,
+} from "pipedrive/v1";
 import { getEnv } from "./env.js";
 
 function createConfig() {
   return new Configuration({ apiKey: getEnv().PIPEDRIVE_API_TOKEN });
+}
+
+function createV1Config() {
+  return new V1Configuration({ apiKey: getEnv().PIPEDRIVE_API_TOKEN });
 }
 
 export async function validateCredentials(): Promise<void> {
@@ -151,4 +159,76 @@ export async function getStagesMap(): Promise<Map<number, string>> {
     }
   }
   return map;
+}
+
+// --- Timeline Notes (v1 API) ---
+
+const TIMELINE_MARKER = "📌 TIMELINE";
+
+export interface TimelineNote {
+  id: number;
+  content: string;
+}
+
+export async function getTimelineNote(dealId: number): Promise<TimelineNote | null> {
+  try {
+    const notesApi = new NotesApi(createV1Config());
+    const response = await notesApi.getNotes({
+      deal_id: dealId,
+      pinned_to_deal_flag: 1,
+      sort: "update_time DESC",
+      limit: 50,
+    });
+    const notes = response.data ?? [];
+    const timeline = notes.find((n: any) => n.content?.includes(TIMELINE_MARKER));
+    if (!timeline) return null;
+    return { id: timeline.id!, content: timeline.content ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertTimelineNote(
+  dealId: number,
+  content: string,
+): Promise<void> {
+  const notesApi = new NotesApi(createV1Config());
+  const existing = await getTimelineNote(dealId);
+
+  if (existing) {
+    await notesApi.updateNote({
+      id: existing.id,
+      NoteRequest: { content },
+    });
+  } else {
+    await notesApi.addNote({
+      AddNoteRequest: {
+        content,
+        deal_id: dealId,
+        pinned_to_deal_flag: 1,
+      } as any,
+    });
+  }
+}
+
+export function formatTimelineHtml(
+  dealTitle: string,
+  entries: { date: string; summary: string }[],
+  stage: string,
+  nextStage: string,
+  health: string,
+  urgency: string,
+): string {
+  const now = new Date().toISOString().split("T")[0];
+  const entryLines = entries
+    .map((e) => `<b>[${e.date}]</b> ${e.summary}`)
+    .join("<br>");
+
+  return `${TIMELINE_MARKER} — ${dealTitle}<br>
+<b>Last AI update:</b> ${now}<br>
+<b>Stage:</b> ${stage} → ${nextStage}<br>
+<b>Health:</b> ${health.toUpperCase()} | <b>Urgency:</b> ${urgency.toUpperCase()}<br>
+<br>
+<b>Key Events:</b><br>
+${entryLines}`;
 }
