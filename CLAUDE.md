@@ -26,6 +26,10 @@ npx tsx src/index.ts <command>
 - `deal <id>` — analyze a single deal by Pipedrive deal ID
   - Options: `--email-days <n>`, `--max-emails <n>`
   - Output includes: pipeline stage → next stage, draft follow-up email with send date, Gmail links in deal history
+- `build-timeline <id>` — build full TIMELINE note for a deal (365 days, 50 emails default)
+  - Options: `--email-days <n>`, `--max-emails <n>`
+  - Run once per deal to initialize; `analyze`/`deal` append incrementally
+  - Writes structured pinned note to Pipedrive: header + key milestones + detailed log
 
 **Marketing scorecard:**
 - `marketing getga4stats` — fetch weekly GA4 metrics
