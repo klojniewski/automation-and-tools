@@ -228,10 +228,10 @@ function printDealAnalysis(result: DealAnalysisResult) {
     }
 
     console.log(`\nDraft Email (send: ${deal.draft_email.send_date}):`);
-    console.log(`  Subject: ${deal.draft_email.subject}`);
-    console.log(`  ---`);
-    console.log(`  ${deal.draft_email.body.split("\n").join("\n  ")}`);
-    console.log(`  ---`);
+    console.log(`Subject: ${deal.draft_email.subject}`);
+    console.log(`---`);
+    console.log(deal.draft_email.body);
+    console.log(`---`);
 
     if (deal.deal_history.length > 0) {
       console.log("\nDeal History:");

@@ -311,7 +311,7 @@ export function appendToTimelineHtml(
     `<b>Last AI update:</b> ${now}`,
   );
   header = header.replace(
-    /<b>Stage:<\/b>[^<]*/,
+    /<b>Stage:<\/b>.*?<b>Health:<\/b>\s*\w+/,
     `<b>Stage:</b> ${headerUpdates.stage} → ${headerUpdates.nextStage} | <b>Health:</b> ${headerUpdates.health.toUpperCase()}`,
   );
   // Update or add status line
@@ -329,13 +329,24 @@ export function appendToTimelineHtml(
     return `<b>[${e.date}]</b> ${e.summary}${link}`;
   };
 
-  const deduped = newEntries.filter((entry) => {
-    // Check if a similar entry already exists (same date + similar text)
-    const datePart = `[${entry.date}]`;
-    const summaryWords = entry.summary.toLowerCase().split(/\s+/).slice(0, 4).join(" ");
-    return !existingLogText.includes(datePart) ||
-      !existingLogText.toLowerCase().includes(summaryWords);
-  });
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).slice(0, 6).join(" ");
+
+  const deduped: TimelineEntry[] = [];
+  const seen = new Set<string>();
+
+  // Collect existing log signatures for dedup
+  for (const line of parsed.detailedLog) {
+    // Extract date and text from "<b>[2026-03-18]</b> some text"
+    const match = line.match(/\[([^\]]+)\]<\/b>\s*(.+?)(?:\s*<a |$)/);
+    if (match) seen.add(`${match[1]}|${normalize(match[2])}`);
+  }
+
+  for (const entry of newEntries) {
+    const key = `${entry.date}|${normalize(entry.summary)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(entry);
+  }
 
   const newLines = deduped.map(formatEntry);
 

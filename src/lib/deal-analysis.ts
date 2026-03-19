@@ -294,26 +294,49 @@ export async function analyzeDealPipeline(options: {
   // Send to Claude for analysis
   const analysis = await analyzeDeals(dealContexts.join("\n\n"), options.top);
 
-  // Append-only update to existing TIMELINE notes (header + new log entries)
+  // Build dealId → enriched context map for auto-creating TIMELINE notes
+  const dealContextMap = new Map<number, string>();
+  deals.forEach((deal, i) => {
+    dealContextMap.set(deal.id ?? 0, dealContexts[i]);
+  });
+
+  // Update existing TIMELINE notes or auto-create missing ones
   await Promise.all(
     analysis.deals.map(async (d) => {
       try {
         const existing = await getTimelineNote(d.deal_id).catch(() => null);
-        if (!existing || !parseTimelineHtml(existing.content)) {
-          // No existing TIMELINE — skip, user should run build-timeline first
-          return;
+        if (existing && parseTimelineHtml(existing.content)) {
+          // Append-only update
+          const updated = appendToTimelineHtml(
+            existing.content,
+            d.deal_history.map((h) => ({ date: h.date, summary: h.summary, email_link: h.email_link })),
+            {
+              stage: d.current_stage,
+              nextStage: d.next_stage,
+              health: d.deal_health,
+              currentStatus: d.reasoning.join("; "),
+            },
+          );
+          await upsertTimelineNote(d.deal_id, updated);
+        } else {
+          // No TIMELINE — auto-create via buildTimeline
+          const context = dealContextMap.get(d.deal_id);
+          if (!context) return;
+          const timeline = await buildTimeline(context);
+          const html = formatFullTimelineHtml({
+            dealTitle: timeline.deal_title,
+            value: timeline.value,
+            contact: timeline.contact,
+            currentStatus: timeline.current_status,
+            milestones: timeline.milestones,
+            detailedLog: timeline.detailed_log,
+            stage: timeline.current_stage,
+            nextStage: timeline.next_stage,
+            health: timeline.deal_health,
+          });
+          await upsertTimelineNote(d.deal_id, html);
+          console.error(`Created TIMELINE note for deal ${d.deal_id}`);
         }
-        const updated = appendToTimelineHtml(
-          existing.content,
-          d.deal_history.map((h) => ({ date: h.date, summary: h.summary, email_link: h.email_link })),
-          {
-            stage: d.current_stage,
-            nextStage: d.next_stage,
-            health: d.deal_health,
-            currentStatus: d.reasoning.join("; "),
-          },
-        );
-        await upsertTimelineNote(d.deal_id, updated);
       } catch (err) {
         console.error(`Failed to update TIMELINE for deal ${d.deal_id}:`, err);
       }
@@ -349,22 +372,40 @@ export async function analyzeSingleDeal(options: {
   const dealContext = await enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails);
   const analysis = await analyzeDeals(dealContext);
 
-  // Append-only update to existing TIMELINE note
+  // Update existing TIMELINE note or auto-create if missing
   for (const d of analysis.deals) {
     try {
       const existing = await getTimelineNote(d.deal_id).catch(() => null);
-      if (!existing || !parseTimelineHtml(existing.content)) continue;
-      const updated = appendToTimelineHtml(
-        existing.content,
-        d.deal_history.map((h) => ({ date: h.date, summary: h.summary, email_link: h.email_link })),
-        {
-          stage: d.current_stage,
-          nextStage: d.next_stage,
-          health: d.deal_health,
-          currentStatus: d.reasoning.join("; "),
-        },
-      );
-      await upsertTimelineNote(d.deal_id, updated);
+      if (existing && parseTimelineHtml(existing.content)) {
+        // Append-only update
+        const updated = appendToTimelineHtml(
+          existing.content,
+          d.deal_history.map((h) => ({ date: h.date, summary: h.summary, email_link: h.email_link })),
+          {
+            stage: d.current_stage,
+            nextStage: d.next_stage,
+            health: d.deal_health,
+            currentStatus: d.reasoning.join("; "),
+          },
+        );
+        await upsertTimelineNote(d.deal_id, updated);
+      } else {
+        // No TIMELINE — auto-create via buildTimeline
+        const timeline = await buildTimeline(dealContext);
+        const html = formatFullTimelineHtml({
+          dealTitle: timeline.deal_title,
+          value: timeline.value,
+          contact: timeline.contact,
+          currentStatus: timeline.current_status,
+          milestones: timeline.milestones,
+          detailedLog: timeline.detailed_log,
+          stage: timeline.current_stage,
+          nextStage: timeline.next_stage,
+          health: timeline.deal_health,
+        });
+        await upsertTimelineNote(d.deal_id, html);
+        console.error(`Created TIMELINE note for deal ${d.deal_id}`);
+      }
     } catch (err) {
       console.error(`Failed to update TIMELINE for deal ${d.deal_id}:`, err);
     }
