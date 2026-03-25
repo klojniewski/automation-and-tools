@@ -55,6 +55,19 @@ export const TimelineSchema = z.object({
 export type TimelineEntry = z.infer<typeof TimelineEntrySchema>;
 export type Timeline = z.infer<typeof TimelineSchema>;
 
+function tryParseJSON(str: string): any {
+  try {
+    return JSON.parse(str);
+  } catch {
+    // Fix common malformed JSON from LLMs: single quotes, trailing commas, unquoted keys
+    const cleaned = str
+      .replace(/'/g, '"')
+      .replace(/,\s*([\]}])/g, '$1')
+      .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+    return JSON.parse(cleaned);
+  }
+}
+
 export async function analyzeDeals(dealContexts: string, topN?: number): Promise<DealPriority> {
   const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
   const today = new Date().toISOString().split("T")[0];
@@ -209,9 +222,9 @@ IMPORTANT formatting rules:
   } else if (Array.isArray(input)) {
     deals = input;
   } else if (typeof input.deals === "string") {
-    deals = JSON.parse(input.deals);
+    deals = tryParseJSON(input.deals);
   } else if (typeof input === "string") {
-    deals = JSON.parse(input);
+    deals = tryParseJSON(input);
   } else {
     // Possibly nested one level deeper — check for any array property
     const arrayProp = Object.values(input).find(Array.isArray);
