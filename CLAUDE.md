@@ -86,6 +86,11 @@ Run with `npx tsx scripts/<name>.ts` (requires `.env` with Google credentials).
   Usage: `npx tsx scripts/debug-deal.ts <dealId> [emailDays] [maxEmails]`.
   Creates `debug/<dealId>/` with .md files: raw deal, contacts, activities, emails,
   enriched context, Claude prompt, and Claude output. Used for accuracy reviews.
+- **`google-sheets-scorecard-menu.js`** — Google Apps Script for the scorecard
+  spreadsheet. Adds a "Scorecard" menu with: Refresh last week, Refresh this week,
+  Refresh specific week. Triggers the `update-scorecard` task via Trigger.dev API.
+  Install: Extensions → Apps Script → paste contents → Save → Reload spreadsheet.
+  Requires `TRIGGER_API_KEY` to be set in the script.
 
 ## Google Auth
 
