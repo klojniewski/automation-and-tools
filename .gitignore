@@ -6,3 +6,5 @@ token.json
 *.tsbuildinfo
 *.DS_Store
 .trigger/
+.claude/
+debug/

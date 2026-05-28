@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { analyzeDealPipeline, analyzeSingleDeal, buildDealTimeline } from "./lib/deal-analysis.js";
+import * as readline from "node:readline/promises";
+import { exec } from "node:child_process";
+import { analyzeDealPipeline, analyzeSingleDeal, buildDealTimeline, enrichDeal } from "./lib/deal-analysis.js";
 import type { DealAnalysisResult } from "./lib/deal-analysis.js";
 import { getGA4Stats } from "./lib/ga4-stats.js";
 import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
 import { getYouTubeStats } from "./lib/youtube-stats.js";
 import { updateScorecard } from "./lib/scorecard.js";
 import { getEnv } from "./lib/env.js";
+import { getGmailClient, validateGmailCredentials, createDraft } from "./lib/gmail.js";
+import { getDealById, getDealContacts, getStagesMap } from "./lib/pipedrive.js";
+import { getGmailUserEmail } from "./lib/gmail.js";
+import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, type FollowupDraft, type RoleContext, type DealRecap } from "./lib/claude.js";
 
 const program = new Command();
 
@@ -99,6 +105,28 @@ program
       process.exit(1);
     }
   });
+
+program
+  .command("followup <idOrUrl>")
+  .description("Interactive: brainstorm follow-up ideas for a deal, draft an email, iterate with feedback, save as Gmail draft. Accepts a deal ID or Pipedrive deal URL.")
+  .option("--email-days <n>", "Email history window in days", "90")
+  .option("--max-emails <n>", "Max emails per contact", "10")
+  .action(async (idOrUrl: string, opts) => {
+    try {
+      const dealId = parseDealId(idOrUrl);
+      await runFollowupCommand(dealId, parseInt(opts.emailDays), parseInt(opts.maxEmails));
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+function parseDealId(input: string): number {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/deal\/(\d+)/) ?? trimmed.match(/^(\d+)$/);
+  if (!match) throw new Error(`Could not parse deal ID from "${input}". Pass a numeric ID or a Pipedrive URL like https://<org>.pipedrive.com/deal/1234`);
+  return parseInt(match[1], 10);
+}
 
 const marketing = program
   .command("marketing")
@@ -243,6 +271,138 @@ function printDealAnalysis(result: DealAnalysisResult) {
 
     console.log("\n----------------------------------------\n");
   }
+}
+
+async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: number): Promise<void> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q: string) => rl.question(q);
+
+  try {
+    console.log(`\nGathering deal context for #${dealId}...`);
+    const gmail = await getGmailClient();
+    await validateGmailCredentials(gmail);
+    const userEmail = await getGmailUserEmail(gmail);
+    const [stages, deal, contacts] = await Promise.all([
+      getStagesMap(),
+      getDealById(dealId),
+      getDealContacts(dealId),
+    ]);
+    const dealContext = await enrichDeal(deal, stages, gmail, userEmail, emailDays, maxEmails);
+    const language = detectLanguage(dealContext);
+
+    const primary = contacts.find((c) => c.email) ?? contacts[0] ?? null;
+    const senderName = process.env.SENDER_NAME?.trim() || "Chris";
+    const roles: RoleContext | undefined = primary
+      ? {
+          senderName,
+          senderEmail: userEmail,
+          recipientName: primary.name,
+          recipientEmail: primary.email ?? "",
+        }
+      : undefined;
+
+    console.log(`Deal: ${deal.title}`);
+    console.log(`Detected language: ${language === "pl" ? "Polish" : "English"}`);
+    if (roles) console.log(`Sender: ${roles.senderName} → Recipient: ${roles.recipientName}\n`);
+    else console.log();
+
+    // Recap + ideas in parallel — recap is shown first, ideas right after.
+    console.log("Summarizing deal and generating 3 follow-up ideas...");
+    const [recap, ideasResult] = await Promise.all([
+      summarizeDealForReview(dealContext, roles),
+      generateFollowupIdeas(dealContext, language, roles),
+    ]);
+    printDealRecap(recap);
+    const { ideas } = ideasResult;
+    console.log();
+    console.log();
+    ideas.forEach((idea, i) => {
+      console.log(`  [${i + 1}] ${idea.angle}`);
+      console.log(`      ${idea.headline}`);
+      console.log(`      Why: ${idea.rationale}\n`);
+    });
+    console.log("  [4] Write my own idea\n");
+
+    let ideaBrief = "";
+    while (!ideaBrief) {
+      const choice = (await ask("Pick 1-4: ")).trim();
+      if (["1", "2", "3"].includes(choice)) {
+        const idea = ideas[parseInt(choice) - 1];
+        ideaBrief = `Angle: ${idea.angle}\nPurpose: ${idea.headline}\nWhy now: ${idea.rationale}`;
+      } else if (choice === "4") {
+        const custom = (await ask("Describe your follow-up idea: ")).trim();
+        if (custom) ideaBrief = `Custom idea from Chris: ${custom}`;
+      } else {
+        console.log("  (pick 1, 2, 3, or 4)");
+      }
+    }
+
+    let draft: FollowupDraft = await draftFollowup({ dealContext, ideaBrief, language, roles });
+    printDraft(draft);
+
+    while (true) {
+      const answer = (await ask("\nFeedback (Enter = accept, or type changes / 'q' to quit): ")).trim();
+      if (answer === "") break;
+      if (answer.toLowerCase() === "q") {
+        console.log("Discarded. No draft saved.");
+        return;
+      }
+      console.log("Revising...");
+      draft = await draftFollowup({ dealContext, ideaBrief, language, roles, previousDraft: draft, feedback: answer });
+      printDraft(draft);
+    }
+
+    const defaultTo = primary?.email ?? "";
+    const toAnswer = (await ask(`Save Gmail draft to [${defaultTo || "no contact found — enter address"}]: `)).trim();
+    const to = toAnswer || defaultTo;
+    if (!to) {
+      console.log("No recipient — skipping Gmail draft. Copy above and send manually.");
+      return;
+    }
+
+    const result = await createDraft(gmail, { to, subject: draft.subject, body: draft.body });
+    console.log(`\nGmail draft saved${result.signatureAppended ? " (signature appended)" : " (no signature — check Gmail settings or token scopes)"}.`);
+    if (result.url) {
+      console.log(`Opening: ${result.url}`);
+      openInBrowser(result.url);
+    } else {
+      console.log(`Open Gmail → Drafts (id: ${result.id})`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+function printDealRecap(recap: DealRecap): void {
+  console.log("\n========== DEAL RECAP ==========");
+  console.log(`\nStatus:\n  ${recap.status}`);
+  console.log(`\nStage goal:\n  ${recap.stage_goal}`);
+  if (recap.milestones.length > 0) {
+    console.log(`\nRecent milestones:`);
+    for (const m of recap.milestones) {
+      console.log(`  [${m.date}] ${m.summary}`);
+    }
+  }
+  console.log(`\nSuggested approach:\n  ${recap.suggested_approach}`);
+  console.log("\n================================");
+}
+
+function openInBrowser(url: string): void {
+  const cmd =
+    process.platform === "darwin" ? "open" :
+    process.platform === "win32" ? "start ''" :
+    "xdg-open";
+  exec(`${cmd} "${url}"`, (err) => {
+    if (err) console.error(`(could not auto-open: ${err.message})`);
+  });
+}
+
+function printDraft(draft: FollowupDraft): void {
+  console.log("\n----------------------------------------");
+  console.log(`Subject: ${draft.subject}`);
+  console.log("----------------------------------------");
+  console.log(draft.body);
+  console.log("----------------------------------------");
 }
 
 program.parse();

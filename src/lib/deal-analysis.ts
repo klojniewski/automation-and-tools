@@ -116,7 +116,7 @@ async function runWithConcurrency<T>(
   return results;
 }
 
-async function enrichDeal(
+export async function enrichDeal(
   deal: DealItem,
   stages: Map<number, string>,
   gmail: gmail_v1.Gmail,
@@ -164,11 +164,32 @@ async function enrichDeal(
           .join("\n---\n")
       : "No email communication found.";
 
+  // Split emails into outbound (from us) and inbound (from prospect).
+  const lowerUserEmail = userEmail.toLowerCase();
+  const outbound = allEmails.filter((e) => e.from.toLowerCase().includes(lowerUserEmail));
+  const inbound = allEmails.filter((e) => !e.from.toLowerCase().includes(lowerUserEmail));
+
+  const fmtLatest = (list: typeof allEmails) => {
+    if (list.length === 0) return "";
+    const d = new Date(list[0].date);
+    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+    return `${d.toISOString().split("T")[0]} (${days === 0 ? "today" : days + "d ago"})`;
+  };
+
+  // Contact log: explicit, separates real client communication from CRM internal noise.
+  const firstContact = outbound.length === 0;
+  let contactLog = `\nContact log:`;
+  contactLog += `\n  Outbound emails to prospect: ${outbound.length}${outbound.length ? ` (latest: ${fmtLatest(outbound)})` : ""}`;
+  contactLog += `\n  Inbound emails from prospect: ${inbound.length}${inbound.length ? ` (latest: ${fmtLatest(inbound)})` : ""}`;
+  if (firstContact) {
+    contactLog += `\n  FIRST CONTACT: you have never emailed this prospect. The deal exists because they filled in the website form / contact form. Treat this email as an INITIAL response to that inbound enquiry. Do NOT reference "my last note", "following up on my message", "as I mentioned" — there is no prior message. Open as a first introduction.`;
+  }
+
   // Determine conversation status — who needs to act next?
   let conversationStatus = "";
   if (allEmails.length > 0) {
     const latest = allEmails[0]; // emails are sorted newest first
-    const isOutbound = latest.from.toLowerCase().includes(userEmail.toLowerCase());
+    const isOutbound = latest.from.toLowerCase().includes(lowerUserEmail);
     const emailDate = new Date(latest.date);
     const daysSinceLastEmail = Math.floor((Date.now() - emailDate.getTime()) / 86_400_000);
     const dateStr = emailDate.toISOString().split("T")[0];
@@ -178,6 +199,8 @@ async function enrichDeal(
     } else {
       conversationStatus = `\nConversation status: ACTION NEEDED — last email was inbound (from prospect) on ${dateStr} (${daysSinceLastEmail === 0 ? "today" : daysSinceLastEmail + "d ago"}). Ball is in our court.`;
     }
+  } else {
+    conversationStatus = `\nConversation status: NO EMAIL THREAD — no emails exchanged with this prospect's address(es) in the last ${emailDays} days. Any prior "activity" or "note" shown below is INTERNAL CRM only, not a message the prospect ever saw.`;
   }
 
   // Format contacts with title/org
@@ -213,12 +236,12 @@ Organization: ${orgName ?? "Unknown"}
 Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
 Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
-${pipelineContext}${conversationStatus}${timelineSection}
+${pipelineContext}${contactLog}${conversationStatus}${timelineSection}
 
-Recent activities:
+Internal CRM activities (PRIVATE — never sent to the prospect, do not reference these as if the prospect saw them):
 ${activityList}
 
-Email history (last ${emailDays} days):
+Email history with prospect (last ${emailDays} days — these ARE the messages the prospect saw):
 ${emailSummary}
 ---`;
 }

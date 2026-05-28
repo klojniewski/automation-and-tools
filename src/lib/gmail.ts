@@ -15,6 +15,78 @@ export async function getGmailUserEmail(gmail: gmail_v1.Gmail): Promise<string> 
   return profile.data.emailAddress ?? "";
 }
 
+let _cachedSignature: string | null | undefined;
+
+export async function getDefaultSignatureHtml(gmail: gmail_v1.Gmail): Promise<string | null> {
+  if (_cachedSignature !== undefined) return _cachedSignature;
+  try {
+    const res = await gmail.users.settings.sendAs.list({ userId: "me" });
+    const sendAs = res.data.sendAs ?? [];
+    const primary = sendAs.find((s) => s.isPrimary) ?? sendAs[0];
+    _cachedSignature = primary?.signature ?? null;
+  } catch {
+    _cachedSignature = null;
+  }
+  return _cachedSignature;
+}
+
+function plainTextToHtml(text: string): string {
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  return paragraphs
+    .map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
+    .join("\n");
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export async function createDraft(
+  gmail: gmail_v1.Gmail,
+  opts: { to: string; subject: string; body: string; appendSignature?: boolean },
+): Promise<{ id: string; messageId: string | null; threadId: string | null; url: string | null; signatureAppended: boolean }> {
+  const appendSig = opts.appendSignature !== false;
+  const signatureHtml = appendSig ? await getDefaultSignatureHtml(gmail) : null;
+
+  const bodyHtml = signatureHtml
+    ? `${plainTextToHtml(opts.body)}\n<br>\n${signatureHtml}`
+    : plainTextToHtml(opts.body);
+
+  const headers = [
+    `To: ${opts.to}`,
+    `Subject: ${encodeSubject(opts.subject)}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "MIME-Version: 1.0",
+  ];
+  const raw = Buffer.from(`${headers.join("\r\n")}\r\n\r\n${bodyHtml}`)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const res = await gmail.users.drafts.create({
+    userId: "me",
+    requestBody: { message: { raw } },
+  });
+  const messageId = res.data.message?.id ?? null;
+  return {
+    id: res.data.id ?? "",
+    messageId,
+    threadId: res.data.message?.threadId ?? null,
+    url: messageId ? `https://mail.google.com/mail/u/0/#drafts/${messageId}` : null,
+    signatureAppended: !!signatureHtml,
+  };
+}
+
+function encodeSubject(subject: string): string {
+  // RFC 2047 encode if subject contains non-ASCII; otherwise leave as-is.
+  if (/^[\x20-\x7E]*$/.test(subject)) return subject;
+  return `=?UTF-8?B?${Buffer.from(subject, "utf-8").toString("base64")}?=`;
+}
+
 export async function searchEmails(
   gmail: gmail_v1.Gmail,
   contactEmail: string,

@@ -332,3 +332,376 @@ Also provide:
 
   return TimelineSchema.parse(toolBlock.input);
 }
+
+export type Language = "en" | "pl";
+
+export function detectLanguage(dealContext: string): Language {
+  // Polish-specific characters that don't appear in English.
+  // Note: a single repeating char (e.g. "Łojniewski" in Chris's signature) is NOT a signal.
+  // Real Polish text contains a diverse mix of these diacritics.
+  const matches = dealContext.match(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g) ?? [];
+  const total = matches.length;
+  const distinct = new Set(matches.map((c) => c.toLowerCase())).size;
+  if (total >= 8 && distinct >= 4) return "pl";
+  return "en";
+}
+
+function languageDirective(lang: Language): string {
+  if (lang === "pl") {
+    return `OUTPUT LANGUAGE: POLISH.
+ALL of your output MUST be in natural, native-level Polish:
+- The 3 idea angles, headlines, and rationales — in Polish.
+- The final email subject and body — in Polish.
+- Professional B2B Polish. Use informal "Cześć [imię]" greeting unless the thread is clearly formal.
+- Sign off "Pozdrawiam, Chris" or "Pozdrawiam serdecznie, Chris".
+- Use Polish diacritics (ą, ć, ę, ł, ń, ó, ś, ź, ż) correctly — do not strip them.
+- Never translate names. Never mix Polish and English in one email.`;
+  }
+  return `OUTPUT LANGUAGE: ENGLISH.
+All angles, headlines, rationales, subject, and body in English. Sign off "Best, Chris" or "Cheers, Chris".`;
+}
+
+const SALES_APPROACH = `Sales approach for the follow-up:
+- Help the prospect: lead with value, insight, or a useful question — never an empty "checking in".
+- Challenge constructively: be honest, surface risks or trade-offs they may not have considered.
+- Lead the conversation: always propose a concrete next step (a call slot, a decision, a deliverable).
+- Don't push too hard: respectful tension, never desperate. One ask per email.
+- Keep deals progressing: every email should move the deal closer to the next pipeline stage.
+
+REAL vs INTERNAL communication — non-negotiable:
+- The deal context has TWO separate sections: "Internal CRM activities" (private notes — the prospect has NEVER seen these) and "Email history with prospect" (real messages the prospect actually received).
+- NEVER reference an internal CRM activity / note / call log as if the prospect saw it. Phrases like "following up on my note", "as I mentioned last week", "my message" are LIES unless there is a matching email in the Email history section.
+- Check the "Contact log" block. If it says "FIRST CONTACT": this is your first message to this prospect ever — open as a first introduction responding to their inbound website enquiry. Never write "following up", "checking in", "circling back" — there is nothing to follow up on.
+- If outbound emails to prospect = 0 but inbound emails > 0: respond to their inbound message. Reference its specific content, not a CRM note.
+- If both outbound and inbound emails exist: you may reference prior emails, but only the ones in the Email history section.
+
+STAGE ANCHORING — non-negotiable:
+- The deal context contains a "Pipeline position" block with the current stage, the exit criteria ("To advance: ..."), and the next stage trigger ("Requires: ...").
+- Every idea you generate and every email you write MUST be aimed at satisfying the current stage's exit criteria — that's the concrete next step.
+- If the deal is at "Lead In": the goal is to book an Intro Meeting. Propose a slot.
+- If "Qualification Call Made": the goal is to complete BANT. Surface the missing BANT items (budget / authority / need / timeline) and ask the right question.
+- If "Deal Qualified" / "Situation Investigated": the goal is to land the Project Concept doc — propose a discovery call or request the input needed to write it.
+- If "Concept Confirmed": the goal is to get the proposal in front of them — propose the meeting/walkthrough.
+- If "Proposal Sent": the goal is to get explicit accept/reject — ask for the decision or the blocker.
+- If "Agreement Sent": the goal is to get the contract signed — surface and resolve open contract terms.
+- Never propose a generic "let me know if you have questions". Always tie the ask to the specific exit criterion for this stage.
+
+TONE — non-negotiable, Chris writes in plain B2-level English:
+- Short, simple words. Common everyday vocabulary. No jargon, no buzzwords, no corporate-speak.
+- Short sentences. Avoid em-dashes and long subordinate clauses. Two short sentences beat one long one.
+- Sound like a real person on a Slack message, not a sales rep on a webinar.
+- BANNED phrases and patterns: "I wanted to check in", "circle back", "touch base", "leverage", "synergy", "constructive tension", "fear-of-loss", "low-friction", "sounding board", "meaningful efficiency angle", "worth a conversation", "happy to be a sounding board", "given X's scale", "the reason I ask", "one thing worth a conversation", "I'd suggest", "walk you through what that looks like in practice".
+- BANNED words that signal AI/corporate writing: "leverage", "utilize", "optimize", "robust", "seamless", "strategic", "holistic", "ecosystem", "stakeholder", "alignment", "synergy", "drive value".
+- Use contractions: "I'm", "you're", "we've", "it's".
+- Length: 3–6 short sentences. Sign off "Best, Chris" or "Cheers, Chris".
+
+READABILITY / FORMATTING — non-negotiable:
+- One idea per paragraph. Max 2 sentences per paragraph.
+- Separate every paragraph with a BLANK LINE (\\n\\n in the body string).
+- Greeting on its own line, then blank line.
+- Each question or each ask on its own line with blank lines around it.
+- Sign-off ("Best, Chris") on its own line, after a blank line.
+- The email should scan in 5 seconds on a phone screen — lots of whitespace, no walls of text.
+- Example shape:
+
+Hey Lucas,
+
+[Short reason for writing — 1 sentence.]
+
+[The ask or the question — 1 sentence.]
+
+[Optional alternative or context — 1 short sentence.]
+
+Best,
+Chris`;
+
+export const FollowupIdeasSchema = z.object({
+  ideas: z
+    .array(
+      z.object({
+        angle: z.string(),
+        headline: z.string(),
+        rationale: z.string(),
+      }),
+    )
+    .length(3),
+});
+export type FollowupIdeas = z.infer<typeof FollowupIdeasSchema>;
+
+export interface RoleContext {
+  senderName: string;
+  senderEmail: string;
+  recipientName: string;
+  recipientEmail: string;
+}
+
+function buildRoleBlock(roles: RoleContext): string {
+  const senderFirst = roles.senderName.split(/\s+/)[0].toLowerCase();
+  const recipientFirst = roles.recipientName.split(/\s+/)[0].toLowerCase();
+  const collision = senderFirst === recipientFirst;
+  const recipientLast = roles.recipientName.split(/\s+/).slice(1).join(" ").trim();
+
+  let block = `ROLE CLARITY — non-negotiable:
+- YOU are writing AS: ${roles.senderName} <${roles.senderEmail}> (the SENDER, the sales rep). Sign off as ${roles.senderName.split(/\s+/)[0]}.
+- The recipient is: ${roles.recipientName} <${roles.recipientEmail}> (the PROSPECT, who has NOT replied yet).
+- The follow-up is FROM the sender TO the prospect. Never write the email as if the prospect is replying. The prospect is the one being asked, not answering.
+- If the deal context shows "Conversation status: WAITING FOR REPLY", the LAST outbound was from the sender — the new email continues that thread by following up, never by pretending to be the prospect's reply.`;
+
+  if (collision && recipientLast) {
+    block += `
+
+NAME COLLISION WARNING: the sender and the prospect share the first name "${roles.senderName.split(/\s+/)[0]}". To eliminate any ambiguity in the greeting, address the prospect by their LAST NAME or full name (e.g. "Hey ${recipientLast}," or "Hi ${roles.recipientName},"). Do NOT use "Hey Chris," — it's confusing because the sender is also Chris.`;
+  } else if (collision) {
+    block += `
+
+NAME COLLISION WARNING: the sender and the prospect share the first name. Use the prospect's full name in the greeting to disambiguate.`;
+  }
+
+  return block;
+}
+
+export async function generateFollowupIdeas(
+  dealContext: string,
+  language: Language = "en",
+  roles?: RoleContext,
+): Promise<FollowupIdeas> {
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+  const today = new Date().toISOString().split("T")[0];
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2000,
+    system: `Today's date: ${today}
+
+You generate follow-up email ideas for a sales rep at a software consulting agency.
+
+${roles ? buildRoleBlock(roles) + "\n\n" : ""}${languageDirective(language)}
+
+${SALES_APPROACH}
+
+Read the deal context and produce EXACTLY 3 distinct follow-up angles. Each angle must be meaningfully different (different purpose, not 3 wordings of the same idea). Consider angles like:
+- Value-add insight (share a relevant observation, resource, or teach moment)
+- Concrete next-step proposal (book the call, send the SOW, set a decision deadline)
+- Honest check / challenge (surface a concern, ask a hard question, reframe)
+- Progress nudge (reference a specific past commitment or open thread)
+- Multi-threading (loop in another stakeholder, escalate)
+
+For each idea:
+- angle: 2–4 word label (e.g. "Decision deadline nudge")
+- headline: one sentence describing the email's purpose
+- rationale: one sentence on why this is the right move for THIS deal right now`,
+    messages: [{ role: "user", content: dealContext }],
+    tools: [
+      {
+        name: "followup_ideas",
+        description: "3 distinct follow-up angle ideas",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            ideas: {
+              type: "array",
+              minItems: 3,
+              maxItems: 3,
+              items: {
+                type: "object",
+                properties: {
+                  angle: { type: "string" },
+                  headline: { type: "string" },
+                  rationale: { type: "string" },
+                },
+                required: ["angle", "headline", "rationale"],
+              },
+            },
+          },
+          required: ["ideas"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "followup_ideas" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("No structured response from Claude");
+  return FollowupIdeasSchema.parse(toolBlock.input);
+}
+
+export const FollowupDraftSchema = z.object({
+  subject: z.string(),
+  body: z.string(),
+});
+export type FollowupDraft = z.infer<typeof FollowupDraftSchema>;
+
+export const DealRecapSchema = z.object({
+  status: z.string(),
+  stage_goal: z.string(),
+  milestones: z
+    .array(z.object({ date: z.string(), summary: z.string() }))
+    .max(5),
+  suggested_approach: z.string(),
+});
+export type DealRecap = z.infer<typeof DealRecapSchema>;
+
+export async function summarizeDealForReview(
+  dealContext: string,
+  roles?: RoleContext,
+): Promise<DealRecap> {
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+  const today = new Date().toISOString().split("T")[0];
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1500,
+    system: `Today's date: ${today}
+
+You produce a tight deal recap for a sales rep about to send a follow-up. The recap must be in ENGLISH (it's internal terminal output for Chris).
+
+${roles ? buildRoleBlock(roles) + "\n\n" : ""}
+
+OUTPUT 4 fields:
+1. status — 1-2 short sentences: where the deal stands right now, who needs to do what, what's blocking. Plain B2 English, no fluff.
+2. stage_goal — 1 sentence restating the EXIT CRITERIA of the current pipeline stage in plain language ("To move to next stage, we need to: ...").
+3. milestones — UP TO 5 of the most important events for understanding this deal, latest first. Each: ISO date + one-line summary. Combine activities + emails; skip trivial acknowledgements/calendar accepts. If the contact log says FIRST CONTACT, the only milestone may be "[date] inbound form enquiry".
+4. suggested_approach — 1 sentence: based on the deal state (stage, last contact, conversation status), what kind of follow-up is most likely to work right now. Be concrete.
+
+Be ruthless about brevity. The point is to refresh Chris's memory in 10 seconds.`,
+    messages: [{ role: "user", content: dealContext }],
+    tools: [
+      {
+        name: "deal_recap",
+        description: "Tight deal recap to help Chris pick a follow-up angle",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            status: { type: "string" },
+            stage_goal: { type: "string" },
+            milestones: {
+              type: "array",
+              maxItems: 5,
+              items: {
+                type: "object",
+                properties: {
+                  date: { type: "string", description: "ISO date YYYY-MM-DD" },
+                  summary: { type: "string", description: "One-line event summary" },
+                },
+                required: ["date", "summary"],
+              },
+            },
+            suggested_approach: { type: "string" },
+          },
+          required: ["status", "stage_goal", "milestones", "suggested_approach"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "deal_recap" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("No structured response from Claude");
+  return DealRecapSchema.parse(toolBlock.input);
+}
+
+const BANNED_PHRASE_PATTERNS: { pattern: RegExp; reason: string }[] = [
+  { pattern: /\bmy (last |previous )?note\b/i, reason: `Don't say "my note" — a "note" implies an internal CRM record, not a real email. Reference the actual prior email's content (subject or specific topic) or open fresh.` },
+  { pattern: /\bmy (last |previous )?message\b/i, reason: `Don't say "my message" — too vague. Reference the actual email's content specifically.` },
+  { pattern: /\b(haven't|have not) heard back\b/i, reason: `Don't open with "haven't heard back" — it's a tired, weak sales opener. Lead with substance.` },
+  { pattern: /\bjust (checking|circling|touching) (in|back|base)\b/i, reason: `"Just checking in / circling back / touching base" is banned — it's an empty opener.` },
+  { pattern: /\bas (i|we) mentioned\b/i, reason: `"As I/we mentioned" is risky — only valid if you can point to a specific prior email's content, otherwise it sounds like you're inventing prior contact.` },
+  { pattern: /\bfollowing up on (my|our) (note|message|email)\b/i, reason: `"Following up on my note/message/email" is banned. Reference the actual content, e.g. "On the React/AWS audit you asked about..."`},
+];
+
+function findBannedPhrases(text: string): string[] {
+  const issues: string[] = [];
+  for (const { pattern, reason } of BANNED_PHRASE_PATTERNS) {
+    const m = text.match(pattern);
+    if (m) issues.push(`Found "${m[0]}" — ${reason}`);
+  }
+  return issues;
+}
+
+export async function draftFollowup(opts: {
+  dealContext: string;
+  ideaBrief: string;
+  language?: Language;
+  roles?: RoleContext;
+  previousDraft?: FollowupDraft;
+  feedback?: string;
+  _retry?: number;
+}): Promise<FollowupDraft> {
+  const language = opts.language ?? "en";
+  const retry = opts._retry ?? 0;
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+  const today = new Date().toISOString().split("T")[0];
+
+  const messages: Anthropic.MessageParam[] = [
+    { role: "user", content: `DEAL CONTEXT:\n${opts.dealContext}\n\nFOLLOW-UP BRIEF:\n${opts.ideaBrief}` },
+  ];
+
+  if (opts.previousDraft && opts.feedback) {
+    messages.push({
+      role: "assistant",
+      content: `Subject: ${opts.previousDraft.subject}\n\n${opts.previousDraft.body}`,
+    });
+    messages.push({
+      role: "user",
+      content: `Revise the email based on this feedback:\n${opts.feedback}`,
+    });
+  }
+
+  const response = await anthropic.messages.create({
+    model: "claude-opus-4-7",
+    max_tokens: 1500,
+    system: `Today's date: ${today}
+
+You write follow-up emails AS the sender (a software consulting agency sales rep). Write in their voice, not a template.
+
+${opts.roles ? buildRoleBlock(opts.roles) + "\n\n" : ""}${languageDirective(language)}
+
+${SALES_APPROACH}
+
+Use the contact's first name. Reference specific details from the deal context — never generic filler. Match the existing email thread style if there is one. If continuing a thread, use "Re: <original subject>".
+
+Before finalising: re-read your draft. If it sounds like a sales email or a LinkedIn post, rewrite it. If you used any banned phrase, rewrite it. If a sentence is longer than 20 words, split it.`,
+    messages,
+    tools: [
+      {
+        name: "followup_email",
+        description: "Subject + body for the follow-up email",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            subject: { type: "string", description: "Subject line — use Re: if continuing a thread" },
+            body: { type: "string", description: "Plain-text email body, 3-6 sentences, signed off as Chris" },
+          },
+          required: ["subject", "body"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "followup_email" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("No structured response from Claude");
+  const draft = FollowupDraftSchema.parse(toolBlock.input);
+
+  // Hard validation — check for banned phrases. Auto-retry with explicit feedback if found.
+  const issues = findBannedPhrases(`${draft.subject}\n${draft.body}`);
+  if (issues.length > 0 && retry < 2) {
+    const retryFeedback = `Your draft contained banned phrases. Fix ALL of these and rewrite:\n${issues.map((i) => `- ${i}`).join("\n")}`;
+    return draftFollowup({
+      dealContext: opts.dealContext,
+      ideaBrief: opts.ideaBrief,
+      language: opts.language,
+      roles: opts.roles,
+      previousDraft: draft,
+      feedback: retryFeedback,
+      _retry: retry + 1,
+    });
+  }
+  return draft;
+}

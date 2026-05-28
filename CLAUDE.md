@@ -30,6 +30,20 @@ npx tsx src/index.ts <command>
   - Options: `--email-days <n>`, `--max-emails <n>`
   - Run once per deal to initialize; `analyze`/`deal` append incrementally
   - Writes structured pinned note to Pipedrive: header + key milestones + detailed log
+- `followup <idOrUrl>` — interactive: produce a draft follow-up email for a single deal
+  - Accepts a numeric deal ID or a full Pipedrive deal URL (e.g. `https://pagepro.pipedrive.com/deal/6905`)
+  - Options: `--email-days <n>` (default 90), `--max-emails <n>` (default 10)
+  - Flow:
+    1. Pulls deal context (Pipedrive deal + contacts + activities + TIMELINE note if present + Gmail thread)
+    2. Detects language (English default, Polish if ≥8 total / ≥4 distinct Polish diacritics)
+    3. Prints a deal recap (status / stage goal / milestones / suggested approach) — generated in parallel with ideas
+    4. Generates 3 distinct follow-up angles (Sonnet) — or `[4] Write my own idea`
+    5. Drafts subject + body (Opus) with hard validation: banned-phrase regex auto-retries up to 2x
+    6. Iterative feedback loop — type changes / press Enter to accept / `q` to discard
+    7. Saves Gmail draft (HTML, with default Gmail signature appended) and auto-opens it in browser
+  - Sales approach baked in: plain B2 English, no corporate-speak, short scannable paragraphs, stage-anchored next step
+  - Language- and role-aware: detects sender/recipient name collision (e.g. prospect also named "Chris") and disambiguates
+  - Separates "Email history with prospect" (real) from "Internal CRM activities" (private notes) to prevent referencing unsent notes
 
 **Marketing scorecard:**
 - `marketing getga4stats` — fetch weekly GA4 metrics
@@ -64,10 +78,13 @@ On-demand tasks can be triggered from the Trigger.dev dashboard or run locally v
 - `src/trigger/analyze-deals.ts` — deal analysis task
 - `src/trigger/get-pipedrive-deals.ts` — Pipedrive deals task
 - `src/lib/scorecard.ts` — orchestration (GA4 + Pipedrive + YouTube → Sheets)
-- `src/lib/deal-analysis.ts` — deal enrichment, pipeline stages, conversation status detection
+- `src/lib/deal-analysis.ts` — deal enrichment, pipeline stages, conversation status detection, contact log
+- `src/lib/claude.ts` — all Claude LLM calls + prompts (SALES_APPROACH, language detection, role context, banned-phrase validation)
 - `src/lib/pipedrive.ts` / `src/lib/pipedrive-stats.ts` — Pipedrive API wrappers
+- `src/lib/gmail.ts` — Gmail search, draft creation (HTML + signature), signature fetch
 - `src/lib/google-auth.ts` — all Google auth clients
 - `src/lib/marketing-config.ts` — column mappings
+- `docs/Pagepro Inbound Sales Process.md` — human-readable sales process (8 stages, BANT, exit criteria). The coded version lives in `src/lib/deal-analysis.ts` `PIPELINE_STAGES`.
 
 ## Scripts (`scripts/`)
 
@@ -86,6 +103,19 @@ Run with `npx tsx scripts/<name>.ts` (requires `.env` with Google credentials).
   Usage: `npx tsx scripts/debug-deal.ts <dealId> [emailDays] [maxEmails]`.
   Creates `debug/<dealId>/` with .md files: raw deal, contacts, activities, emails,
   enriched context, Claude prompt, and Claude output. Used for accuracy reviews.
+- **`refresh-gmail-token.ts`** — Generates a new Gmail OAuth2 refresh token with
+  read + compose + settings scopes. Run after adding new scopes (e.g. when adding
+  Calendar later). Same flow as `refresh-youtube-token.ts` — browser consent, paste
+  redirect URL, update `GOOGLE_GMAIL_REFRESH_TOKEN` in `.env` and Trigger.dev prod.
+- **`dump-deal-context.ts`** — Prints the enriched deal context that the
+  `followup`/`analyze` LLM actually sees. Useful for debugging prompt issues or
+  verifying that contact log / TIMELINE notes are picked up correctly.
+  Usage: `npx tsx scripts/dump-deal-context.ts <dealId>`.
+- **`test-followup-lang.ts`** — Verifies language detection for the `followup`
+  command on a given deal (counts Polish diacritics, prints detected language).
+  Usage: `npx tsx scripts/test-followup-lang.ts <dealId>`.
+- **`check-timeline-coverage.ts`** — Reports which deals have/lack a Pipedrive
+  TIMELINE note. Useful before bulk-running `build-timeline`.
 - **`google-sheets-scorecard-menu.js`** — Google Apps Script for the scorecard
   spreadsheet. Adds a "Scorecard" menu with: Refresh last week, Refresh this week,
   Refresh specific week. Triggers the `update-scorecard` task via Trigger.dev API.
@@ -117,6 +147,8 @@ Run with `npx tsx scripts/<name>.ts` (requires `.env` with Google credentials).
 **Gmail OAuth2**
 - Env var: `GOOGLE_GMAIL_REFRESH_TOKEN`
 - Uses same OAuth2 client as YouTube (different refresh token)
+- Scopes: `gmail.readonly` (search/read), `gmail.compose` (create drafts), `gmail.settings.basic` (read default signature)
+- Token refresh script: `scripts/refresh-gmail-token.ts`. Re-run when scopes change.
 
 ### Known Gotchas
 - YouTube token expired with `invalid_grant` — root cause: token was generated while consent screen was in Testing mode (7-day expiry). Fix: move consent screen to Production, then re-generate token.
@@ -131,3 +163,18 @@ Run with `npx tsx scripts/<name>.ts` (requires `.env` with Google credentials).
 - `GA4_PROPERTY_ID`
 - `GOOGLE_SHEETS_ID`
 - `GOOGLE_SHEETS_TAB`
+- `ANTHROPIC_API_KEY`
+- `PIPEDRIVE_API_TOKEN`, `PIPEDRIVE_USER_ID`
+- `SENDER_NAME` (optional, defaults to "Chris" — first-name used in `followup` greetings and role context)
+
+## Follow-up command implementation notes
+
+The `followup` CLI is implemented across:
+- `src/index.ts` — `runFollowupCommand` orchestration, interactive REPL, signature/recap printing, browser auto-open
+- `src/lib/claude.ts` — `summarizeDealForReview` (Sonnet recap), `generateFollowupIdeas` (Sonnet, 3 angles), `draftFollowup` (Opus, with banned-phrase validation + auto-retry), `detectLanguage` (Polish diacritic heuristic, ≥8 total + ≥4 distinct), `buildRoleBlock` (sender/recipient with collision detection), `SALES_APPROACH` constant (tone + readability + stage anchoring + real-vs-internal rules)
+- `src/lib/gmail.ts` — `createDraft` (HTML body, RFC 2047 subject encoding, signature appended), `getDefaultSignatureHtml` (cached per-process)
+- `src/lib/deal-analysis.ts` — `enrichDeal` exports the deal context including a `Contact log` block (outbound/inbound email counts + `FIRST CONTACT` flag) and clearly-labelled "Internal CRM activities" vs "Email history with prospect" sections
+
+Models used:
+- Idea generation + deal recap: `claude-sonnet-4-6`
+- Email drafting: `claude-opus-4-7` (highest quality for tone-sensitive writing)
