@@ -1,10 +1,19 @@
-/** BOFU (bottom-of-funnel) page paths — sessions on these pages indicate high-intent traffic. */
+/** BOFU (bottom-of-funnel) page paths — sessions on these pages indicate high-intent traffic.
+ *  Matched with CONTAINS, so query strings / trailing slashes / sub-pages all count.
+ *  Homepage "/" is handled separately via HOMEPAGE_PATH (exact match) — never add "/" here,
+ *  CONTAINS of "/" would match every URL on the site. */
 export const BOFU_PAGES = [
+  "/services/custom-cms-development",
   "/services/nextjs-development",
   "/services/expo-development",
   "/services/reactjs-development",
   "/services/sanity-development",
   "/services/react-native-development",
+  "/services/wordpress-migration",
+  "/services/contentful-migration-services",
+  "/services/headless-cms-development",
+  "/services/frontend-development",
+  "/services/legacy-system-migration-services",
 ];
 
 /** Homepage is tracked separately because it uses EXACT match instead of CONTAINS. */

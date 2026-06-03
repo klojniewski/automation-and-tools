@@ -54,6 +54,10 @@ npx tsx src/index.ts <command>
 - `marketing updateScorecard` — full scorecard update (all sources → Sheet)
 - All marketing commands support `--week <YYWW>` and `--dry-run`
 
+**Scorecard metric notes:**
+- All traffic columns use **GA4 `sessions`** as the metric (Total Traffic, Organic, Direct, Referral, Paid, Blog, AI, BOFU, Not-Paid BOFU, Quality Traffic). Engagement Rate uses GA4's `engagementRate`.
+- BOFU page set lives in `src/lib/marketing-config.ts` `BOFU_PAGES` — matched with **CONTAINS** (so query strings, trailing slashes, sub-pages all count). Homepage `/` is added separately via `HOMEPAGE_PATH` (EXACT match) — never put `/` in `BOFU_PAGES` because CONTAINS of `/` would match every URL.
+
 ### Trigger.dev Tasks
 
 All task definitions live in `src/trigger/`:

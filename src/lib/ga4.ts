@@ -165,12 +165,12 @@ export async function fetchGA4Metrics(
         baseReport(startDate, endDate),
         {
           dateRanges: [{ startDate, endDate }],
-          metrics: [{ name: "activeUsers" }],
+          metrics: [{ name: "sessions" }],
           dimensionFilter: bofuFilter(),
         },
         {
           dateRanges: [{ startDate, endDate }],
-          metrics: [{ name: "activeUsers" }],
+          metrics: [{ name: "sessions" }],
           dimensionFilter: {
             andGroup: {
               expressions: [bofuFilter(), notPaidChannel()],
