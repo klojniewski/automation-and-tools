@@ -46,8 +46,16 @@ function escapeHtml(s: string): string {
 
 export async function createDraft(
   gmail: gmail_v1.Gmail,
-  opts: { to: string; subject: string; body: string; appendSignature?: boolean },
-): Promise<{ id: string; messageId: string | null; threadId: string | null; url: string | null; signatureAppended: boolean }> {
+  opts: {
+    to: string;
+    subject: string;
+    body: string;
+    appendSignature?: boolean;
+    threadId?: string | null;
+    inReplyTo?: string | null;
+    references?: string | null;
+  },
+): Promise<{ id: string; messageId: string | null; threadId: string | null; url: string | null; signatureAppended: boolean; attachedToThread: boolean }> {
   const appendSig = opts.appendSignature !== false;
   const signatureHtml = appendSig ? await getDefaultSignatureHtml(gmail) : null;
 
@@ -61,15 +69,21 @@ export async function createDraft(
     "Content-Type: text/html; charset=UTF-8",
     "MIME-Version: 1.0",
   ];
+  if (opts.inReplyTo) headers.push(`In-Reply-To: ${opts.inReplyTo}`);
+  if (opts.references) headers.push(`References: ${opts.references}`);
+
   const raw = Buffer.from(`${headers.join("\r\n")}\r\n\r\n${bodyHtml}`)
     .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
+  const message: gmail_v1.Schema$Message = { raw };
+  if (opts.threadId) message.threadId = opts.threadId;
+
   const res = await gmail.users.drafts.create({
     userId: "me",
-    requestBody: { message: { raw } },
+    requestBody: { message },
   });
   const messageId = res.data.message?.id ?? null;
   return {
@@ -78,6 +92,7 @@ export async function createDraft(
     threadId: res.data.message?.threadId ?? null,
     url: messageId ? `https://mail.google.com/mail/u/0/#drafts/${messageId}` : null,
     signatureAppended: !!signatureHtml,
+    attachedToThread: !!opts.threadId,
   };
 }
 
@@ -115,6 +130,9 @@ export async function searchEmails(
         headers.find((h) => h.name === name)?.value ?? "";
       return {
         id: msg.id!,
+        threadId: detail.data.threadId ?? null,
+        messageIdHeader: getHeader("Message-ID") || getHeader("Message-Id"),
+        references: getHeader("References"),
         from: getHeader("From"),
         to: getHeader("To"),
         subject: getHeader("Subject"),

@@ -9,7 +9,7 @@ import { getPipedriveDeals } from "./lib/pipedrive-stats.js";
 import { getYouTubeStats } from "./lib/youtube-stats.js";
 import { updateScorecard } from "./lib/scorecard.js";
 import { getEnv } from "./lib/env.js";
-import { getGmailClient, validateGmailCredentials, createDraft } from "./lib/gmail.js";
+import { getGmailClient, validateGmailCredentials, createDraft, searchEmails } from "./lib/gmail.js";
 import { getDealById, getDealContacts, getStagesMap } from "./lib/pipedrive.js";
 import { getGmailUserEmail } from "./lib/gmail.js";
 import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, type FollowupDraft, type RoleContext, type DealRecap } from "./lib/claude.js";
@@ -360,8 +360,51 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
       return;
     }
 
-    const result = await createDraft(gmail, { to, subject: draft.subject, body: draft.body });
-    console.log(`\nGmail draft saved${result.signatureAppended ? " (signature appended)" : " (no signature — check Gmail settings or token scopes)"}.`);
+    // Look up the most recent Gmail thread with the recipient.
+    let threadId: string | null = null;
+    let inReplyTo: string | null = null;
+    let references: string | null = null;
+    let latestSubject = "";
+    let latestDate = "";
+    try {
+      const recent = await searchEmails(gmail, to, emailDays, 5);
+      const latest = recent.sort((a, b) => +new Date(b.date) - +new Date(a.date))[0];
+      if (latest?.threadId) {
+        threadId = latest.threadId;
+        inReplyTo = latest.messageIdHeader || null;
+        references = [latest.references, latest.messageIdHeader].filter(Boolean).join(" ").trim() || null;
+        latestSubject = latest.subject;
+        latestDate = latest.date ? new Date(latest.date).toISOString().split("T")[0] : "";
+      }
+    } catch {
+      // ignore — no prior thread
+    }
+
+    // Interactive thread choice (only when a prior thread exists).
+    if (threadId) {
+      const threadAnswer = (
+        await ask(
+          `\nA prior Gmail thread exists with this recipient:\n  [${latestDate}] ${latestSubject}\nAttach the draft to this thread? [Y/n]: `,
+        )
+      ).trim().toLowerCase();
+      if (threadAnswer === "n" || threadAnswer === "no") {
+        threadId = null;
+        inReplyTo = null;
+        references = null;
+      }
+    }
+
+    const result = await createDraft(gmail, {
+      to,
+      subject: draft.subject,
+      body: draft.body,
+      threadId,
+      inReplyTo,
+      references,
+    });
+    const sigNote = result.signatureAppended ? " (signature appended)" : " (no signature — check Gmail settings or token scopes)";
+    const threadNote = result.attachedToThread ? " — attached to existing thread" : " — standalone";
+    console.log(`\nGmail draft saved${sigNote}${threadNote}.`);
     if (result.url) {
       console.log(`Opening: ${result.url}`);
       openInBrowser(result.url);

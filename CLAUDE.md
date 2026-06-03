@@ -40,7 +40,9 @@ npx tsx src/index.ts <command>
     4. Generates 3 distinct follow-up angles (Sonnet) — or `[4] Write my own idea`
     5. Drafts subject + body (Opus) with hard validation: banned-phrase regex auto-retries up to 2x
     6. Iterative feedback loop — type changes / press Enter to accept / `q` to discard
-    7. Saves Gmail draft (HTML, with default Gmail signature appended) and auto-opens it in browser
+    7. Asks for recipient address (defaults to primary contact)
+    8. If a prior Gmail thread with the recipient exists, asks whether to attach the draft to it (default Yes) or save as a standalone new thread
+    9. Saves Gmail draft (HTML, with default Gmail signature appended, threaded via threadId + In-Reply-To/References when attaching) and auto-opens it in browser
   - Sales approach baked in: plain B2 English, no corporate-speak, short scannable paragraphs, stage-anchored next step
   - Language- and role-aware: detects sender/recipient name collision (e.g. prospect also named "Chris") and disambiguates
   - Separates "Email history with prospect" (real) from "Internal CRM activities" (private notes) to prevent referencing unsent notes
