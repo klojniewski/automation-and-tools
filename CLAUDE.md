@@ -128,6 +128,39 @@ Run with `npx tsx scripts/<name>.ts` (requires `.env` with Google credentials).
   Install: Extensions → Apps Script → paste contents → Save → Reload spreadsheet.
   Requires `TRIGGER_API_KEY` to be set in the script.
 
+## Pipedrive MCP server (Claude Desktop)
+
+`pipedrive-mcp.mjs` (repo root) is a local stdio MCP server that exposes Pipedrive
+read tools to Claude Desktop. Modelled on `chris-brain/amie-mcp.mjs`: single-user,
+plain Node ESM, token read from `.env` next to the script (`PIPEDRIVE_API_TOKEN`,
+`PIPEDRIVE_USER_ID`). Uses the Pipedrive v1 REST API directly via `fetch` — no
+TypeScript build step, no shared deps with `src/lib/pipedrive.ts`.
+
+**Tools exposed (read-only):**
+- `list_my_deals(status?, pipeline_id?, limit?)` — open deals owned by you
+- `get_deal(id_or_url)` — full deal by id or Pipedrive URL
+- `get_deal_contacts(id_or_url)` — contacts on a deal
+- `get_deal_activities(id_or_url, limit?)` — recent activities/calls/meetings
+- `get_deal_notes(id_or_url, limit?)` — notes, including pinned TIMELINE
+- `search_deals(term, limit?)` — search by title/person/org
+- `list_pipeline_stages()` — all stages across pipelines
+
+**Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+"pipedrive": {
+  "command": "/opt/homebrew/bin/node",
+  "args": ["/Users/chris/1_PROJECTS/myautomations/pipedrive-mcp.mjs"]
+}
+```
+Restart Claude Desktop (quit + reopen) after editing the config — the server only
+loads on cold start. Tools appear under the 🔌 icon in chat.
+
+**Smoke-test from terminal:**
+```bash
+node pipedrive-mcp.mjs <<< '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}'
+```
+Should print `pipedrive-mcp: running on stdio` then the initialize response.
+
 ## Google Auth
 
 ### Google Cloud Project
