@@ -44,6 +44,20 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * Removes a trailing sign-off block ("Best,\nChris", "Cheers,\nChris", etc.)
+ * from the end of an email body. Used when a Gmail signature — which already
+ * contains its own sign-off — is appended, to avoid a duplicate valediction.
+ */
+function stripTrailingSignoff(body: string): string {
+  return body
+    .replace(
+      /\n+\s*(best|best regards|kind regards|warm regards|regards|cheers|thanks|thank you|all the best|talk soon|speak soon)[,.!]?\s*(\n+[^\n]{0,40})?\s*$/i,
+      "",
+    )
+    .trimEnd();
+}
+
 export async function createDraft(
   gmail: gmail_v1.Gmail,
   opts: {
@@ -59,9 +73,13 @@ export async function createDraft(
   const appendSig = opts.appendSignature !== false;
   const signatureHtml = appendSig ? await getDefaultSignatureHtml(gmail) : null;
 
+  // The signature carries its own sign-off ("Best, Chris ...") — strip the
+  // model's trailing sign-off so it doesn't appear twice.
+  const body = signatureHtml ? stripTrailingSignoff(opts.body) : opts.body;
+
   const bodyHtml = signatureHtml
-    ? `${plainTextToHtml(opts.body)}\n<br>\n${signatureHtml}`
-    : plainTextToHtml(opts.body);
+    ? `${plainTextToHtml(body)}\n<br>\n${signatureHtml}`
+    : plainTextToHtml(body);
 
   const headers = [
     `To: ${opts.to}`,
@@ -111,9 +129,11 @@ export async function searchEmails(
   const afterDate = new Date(Date.now() - daysBack * 86_400_000);
   const after = `${afterDate.getFullYear()}/${String(afterDate.getMonth() + 1).padStart(2, "0")}/${String(afterDate.getDate()).padStart(2, "0")}`;
 
+  // Exclude drafts (and trash/spam): an unsent draft — including ones this tool
+  // saves — must NOT count as a real email exchanged with the prospect.
   const response = await gmail.users.messages.list({
     userId: "me",
-    q: `(from:${contactEmail} OR to:${contactEmail}) after:${after}`,
+    q: `(from:${contactEmail} OR to:${contactEmail}) after:${after} -in:drafts -in:trash -in:spam`,
     maxResults,
   });
 
@@ -128,9 +148,11 @@ export async function searchEmails(
       const headers = detail.data.payload?.headers ?? [];
       const getHeader = (name: string) =>
         headers.find((h) => h.name === name)?.value ?? "";
+      const labelIds = detail.data.labelIds ?? [];
       return {
         id: msg.id!,
         threadId: detail.data.threadId ?? null,
+        labelIds,
         messageIdHeader: getHeader("Message-ID") || getHeader("Message-Id"),
         references: getHeader("References"),
         from: getHeader("From"),
@@ -143,7 +165,8 @@ export async function searchEmails(
     }),
   );
 
-  return details;
+  // Defensive backstop: drop anything still carrying the DRAFT label.
+  return details.filter((m) => !m.labelIds.includes("DRAFT"));
 }
 
 function extractTextBody(payload: any): string {

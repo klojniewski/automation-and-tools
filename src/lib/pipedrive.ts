@@ -10,6 +10,7 @@ import type { DealItem } from "pipedrive/v2";
 import {
   Configuration as V1Configuration,
   NotesApi,
+  ActivityTypesApi,
 } from "pipedrive/v1";
 import { getEnv } from "./env.js";
 
@@ -107,6 +108,52 @@ export async function getDealActivities(dealId: number, limit = 5) {
     limit,
   } as any);
   return response.data ?? [];
+}
+
+let _activityTypeCache: Map<string, string> | undefined;
+
+/**
+ * Resolves an activity type's display name (e.g. "Follow Up") to the
+ * `key_string` that the add-activity API expects. Case-insensitive; cached
+ * per-process. Returns null if no matching type exists.
+ */
+export async function getActivityTypeKey(name: string): Promise<string | null> {
+  if (!_activityTypeCache) {
+    const api = new ActivityTypesApi(createV1Config());
+    const response = await api.getActivityTypes();
+    _activityTypeCache = new Map(
+      (response.data ?? []).map((t) => [(t.name ?? "").trim().toLowerCase(), t.key_string ?? ""]),
+    );
+  }
+  return _activityTypeCache.get(name.trim().toLowerCase()) || null;
+}
+
+/** Creates an activity on a deal (e.g. to log a drafted follow-up email). */
+export async function createDealActivity(opts: {
+  dealId: number;
+  subject: string;
+  type?: string; // Pipedrive activity type key; defaults to "email"
+  note?: string; // free-text / HTML note (e.g. the email body)
+  dueDate?: string; // YYYY-MM-DD
+  dueTime?: string; // HH:MM
+  done?: boolean;
+  personId?: number;
+}): Promise<number | null> {
+  const activitiesApi = new ActivitiesApi(createConfig());
+  const response = await activitiesApi.addActivity({
+    AddActivityRequest: {
+      deal_id: opts.dealId,
+      subject: opts.subject,
+      type: opts.type ?? "email",
+      ...(opts.note ? { note: opts.note } : {}),
+      ...(opts.dueDate ? { due_date: opts.dueDate } : {}),
+      ...(opts.dueTime ? { due_time: opts.dueTime } : {}),
+      ...(opts.done !== undefined ? { done: opts.done } : {}),
+      // person_id is read-only in the v2 API — set the contact as the primary participant instead.
+      ...(opts.personId ? { participants: [{ person_id: opts.personId, primary: true }] } : {}),
+    },
+  });
+  return response.data?.id ?? null;
 }
 
 export async function fetchDealsInRange(

@@ -371,6 +371,8 @@ const SALES_APPROACH = `Sales approach for the follow-up:
 REAL vs INTERNAL communication — non-negotiable:
 - The deal context has TWO separate sections: "Internal CRM activities" (private notes — the prospect has NEVER seen these) and "Email history with prospect" (real messages the prospect actually received).
 - NEVER reference an internal CRM activity / note / call log as if the prospect saw it. Phrases like "following up on my note", "as I mentioned last week", "my message" are LIES unless there is a matching email in the Email history section.
+- NEVER use the word "note" for something you sent the prospect. Banned outright: "my note", "my last note", "my previous note", "my earlier note" — a note is an internal record the prospect never saw. This is a hard ban (the draft is rejected if it appears).
+- When you reference a prior email to the prospect, name its actual subject or topic instead — e.g. "my email about the React/AWS audit" or "the proposal I sent on Monday". If you can't point to a specific real email, open fresh and don't reference any prior message.
 - Check the "Contact log" block. If it says "FIRST CONTACT": this is your first message to this prospect ever — open as a first introduction responding to their inbound website enquiry. Never write "following up", "checking in", "circling back" — there is nothing to follow up on.
 - If outbound emails to prospect = 0 but inbound emails > 0: respond to their inbound message. Reference its specific content, not a CRM note.
 - If both outbound and inbound emails exist: you may reference prior emails, but only the ones in the Email history section.
@@ -388,32 +390,74 @@ STAGE ANCHORING — non-negotiable:
 
 TONE — non-negotiable, Chris writes in plain B2-level English:
 - Short, simple words. Common everyday vocabulary. No jargon, no buzzwords, no corporate-speak.
-- Short sentences. Avoid em-dashes and long subordinate clauses. Two short sentences beat one long one.
+- Short sentences. Two short sentences beat one long one. No long subordinate clauses.
 - Sound like a real person on a Slack message, not a sales rep on a webinar.
+
+NO AI TELLS — non-negotiable (the em-dash is the #1 giveaway):
+- NEVER use an em-dash (—) or en-dash (–). Not once. Use a full stop, a comma, or split into two sentences instead. This is a hard rule — a single dash means the draft is rejected.
+- No curly/smart quotes — use plain straight quotes ' and ".
+- No rule-of-three lists ("fast, clean, and reliable"), no "not just X, but Y" parallelisms, no synonym-stacking.
+- No throat-clearing or signposting ("Quick question", "Just to be clear", "Here's the thing").
+- No manufactured drama or aphorisms. Plain, direct, slightly informal — like a quick note to a peer.
 - BANNED phrases and patterns: "I wanted to check in", "circle back", "touch base", "leverage", "synergy", "constructive tension", "fear-of-loss", "low-friction", "sounding board", "meaningful efficiency angle", "worth a conversation", "happy to be a sounding board", "given X's scale", "the reason I ask", "one thing worth a conversation", "I'd suggest", "walk you through what that looks like in practice".
 - BANNED words that signal AI/corporate writing: "leverage", "utilize", "optimize", "robust", "seamless", "strategic", "holistic", "ecosystem", "stakeholder", "alignment", "synergy", "drive value".
 - Use contractions: "I'm", "you're", "we've", "it's".
 - Length: 3–6 short sentences. Sign off "Best, Chris" or "Cheers, Chris".
 
 READABILITY / FORMATTING — non-negotiable:
-- One idea per paragraph. Max 2 sentences per paragraph.
-- Separate every paragraph with a BLANK LINE (\\n\\n in the body string).
-- Greeting on its own line, then blank line.
-- Each question or each ask on its own line with blank lines around it.
-- Sign-off ("Best, Chris") on its own line, after a blank line.
+- ONE SENTENCE PER PARAGRAPH. Every single sentence stands on its own line with a BLANK LINE before and after it. Never put two sentences in the same paragraph, even short ones.
+- A blank line = "\\n\\n" in the body string. So between every sentence there must be a "\\n\\n".
+- This applies to standalone remarks too: "Either answer is fine." is its own line. Each "If X, then Y." conditional is its own line.
+- Greeting on its own line, then blank line. Sign-off ("Best," then "Chris") at the end, after a blank line.
 - The email should scan in 5 seconds on a phone screen — lots of whitespace, no walls of text.
-- Example shape:
+- Example shape (note: EVERY sentence separated by a blank line):
 
 Hey Lucas,
 
-[Short reason for writing — 1 sentence.]
+[Short reason for writing. One sentence.]
 
-[The ask or the question — 1 sentence.]
+[The question. One sentence.]
 
-[Optional alternative or context — 1 short sentence.]
+[A standalone remark. One sentence.]
+
+[The ask. One sentence.]
+
+[Optional context or the alternative. One sentence.]
 
 Best,
 Chris`;
+
+/**
+ * Day-of-week-aware scheduling guidance. The right horizon for "when should we
+ * talk" depends on the send day: early in the week there's still room THIS week;
+ * late in the week you should point to NEXT week. Prevents the model proposing
+ * "next week" on a Monday (a real edit Chris kept making). Boundary: Mon–Wed =>
+ * this week, Thu–Fri => next week, weekend => next week.
+ */
+export function buildSchedulingRule(now: Date): string {
+  const dow = now.getDay(); // 0 Sun ... 6 Sat
+  const name = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][dow];
+  let horizon: string;
+  if (dow >= 1 && dow <= 3) {
+    horizon = `It is early in the week (Mon–Wed), so propose THIS week — there are still enough working days left to plan. Prefer concrete days, e.g. "later this week (Thu or Fri)". Do NOT say "next week".`;
+  } else if (dow === 4 || dow === 5) {
+    horizon = `It is late in the week (Thu–Fri), so propose EARLY NEXT week, e.g. "Monday or Tuesday next week". Do NOT say "this week".`;
+  } else {
+    horizon = `It is the weekend, so propose NEXT week.`;
+  }
+  return `SCHEDULING HORIZON — today is ${name}:
+- When you propose a call/meeting time, match the horizon to the send day (above), not a generic default.
+- ${horizon}`;
+}
+
+/** Chris's real Calendly booking link. The model must never invent or alter it. */
+const CALENDLY_URL = "https://calendly.com/chris8/30min";
+
+const SCHEDULING_LINK_RULE = `BOOKING LINK — non-negotiable:
+- Chris's booking link is EXACTLY: ${CALENDLY_URL}
+- NEVER invent, guess, shorten, or alter a URL. If you include a booking link, it must be ${CALENDLY_URL} character for character. A made-up link is worse than none.
+- When the email proposes a call/meeting, put this link in the BODY of the email (recipients don't read the signature footer, so don't rely on it).
+- If the email is not about booking a meeting, don't include the link.`;
 
 export const FollowupIdeasSchema = z.object({
   ideas: z
@@ -543,6 +587,91 @@ export const DealRecapSchema = z.object({
 });
 export type DealRecap = z.infer<typeof DealRecapSchema>;
 
+export const FollowupInsightsSchema = z.object({
+  summary: z.string(),
+  recommendations: z.array(
+    z.object({
+      pattern: z.string(),
+      evidence: z.string(),
+      confidence: z.enum(["high", "medium", "low"]),
+      change: z.string(),
+      location: z.string(),
+    }),
+  ),
+});
+export type FollowupInsights = z.infer<typeof FollowupInsightsSchema>;
+
+/**
+ * Meta-analysis over followup run logs: reads a digest of edits (generated draft
+ * vs actually-sent), in-loop feedback, and validation retries, and proposes
+ * concrete prompt/agent improvements. It ONLY recommends — it never edits code.
+ * Honest about sample size: patterns backed by a single email must be "low".
+ */
+export async function analyzeFollowupLogs(digest: string): Promise<FollowupInsights> {
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+
+  const response = await anthropic.messages.create({
+    model: "claude-opus-4-7",
+    max_tokens: 2500,
+    system: `You improve an AI that drafts B2B sales follow-up emails. You are given a digest of real usage logs. Each deal block starts with a "Context:" line (day the email was drafted/sent, language) followed by:
+- SENT-vs-DRAFT edits: lines the model wrote ("-") vs what the human actually sent ("+"). These are the human's corrections — the strongest signal.
+- In-loop feedback: revision instructions the human typed during drafting.
+- Validation retries: banned phrases/patterns the model kept producing.
+- Idea/subject stats.
+
+Your job: find patterns and propose concrete changes to the drafting system.
+
+HOW TO READ AN EDIT — first classify each edit, then judge it:
+- Classify the change type: temporal/scheduling (days, "this/next week", times), formatting (lists, italics, line breaks), word-choice, deletion, tone, structure.
+- CRITICAL: check the edit against the Context line. Some edits are only explained by context. Example: "next week" -> "this week" is NOT random taste — correlate it with the send weekday (early week => "this week" makes sense; late week => "next week"). Always test temporal/scheduling edits against the send day, greetings against language, etc.
+
+TWO KINDS OF RULE — judge sample size differently:
+- LOGICAL / context-conditioned rule (derivable from calendar, language, deal stage, seniority): if the edit is explained by context, it is a real rule even from ONE email. You may propose it with "medium" (or "high" if the logic is airtight). State the rule as a function of the context (e.g. "if sent Mon–Wed, propose this week; if Thu–Fri, next week").
+- STATISTICAL / taste rule (recurring stylistic preference with no contextual driver, e.g. "prefers italics"): needs the SAME pattern across 3+ distinct emails before it is actionable. A single-email taste edit is "low" — "watch, don't change yet".
+
+RULES:
+- Only surface a pattern that actually appears in the data. Quote the evidence, including the relevant Context (e.g. "sent on a Monday").
+- Prioritise: put the most important learnable rule first. Don't bury a clear logical rule under low-confidence noise.
+- For each recommendation give: the pattern, the evidence (context + how many emails + short example), a confidence, the concrete change, and WHERE. Valid locations: "SALES_APPROACH (claude.ts)", "buildSchedulingRule (claude.ts)", "BANNED_PHRASE_PATTERNS (claude.ts)", "reflow (claude.ts)", "generateStandaloneSubject (claude.ts)", "validation", or "none — watch".
+- If the data is too thin for any change, say so in the summary.`,
+    messages: [{ role: "user", content: digest }],
+    tools: [
+      {
+        name: "followup_insights",
+        description: "Recurring-pattern findings and proposed prompt/agent changes",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            summary: { type: "string", description: "Overall read of the data incl. honest sample-size caveat" },
+            recommendations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  pattern: { type: "string" },
+                  evidence: { type: "string", description: "How many distinct emails + short example" },
+                  confidence: { type: "string", enum: ["high", "medium", "low"] },
+                  change: { type: "string", description: "Concrete change to make (or 'watch, don't change yet')" },
+                  location: { type: "string" },
+                },
+                required: ["pattern", "evidence", "confidence", "change", "location"],
+              },
+            },
+          },
+          required: ["summary", "recommendations"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "followup_insights" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("No structured response from Claude");
+  return FollowupInsightsSchema.parse(toolBlock.input);
+}
+
 export async function summarizeDealForReview(
   dealContext: string,
   roles?: RoleContext,
@@ -605,7 +734,8 @@ Be ruthless about brevity. The point is to refresh Chris's memory in 10 seconds.
 }
 
 const BANNED_PHRASE_PATTERNS: { pattern: RegExp; reason: string }[] = [
-  { pattern: /\bmy (last |previous )?note\b/i, reason: `Don't say "my note" — a "note" implies an internal CRM record, not a real email. Reference the actual prior email's content (subject or specific topic) or open fresh.` },
+  { pattern: /[—–]/, reason: `Em-dashes (—) and en-dashes (–) are banned — they are the #1 AI-writing tell. Rewrite using a full stop, a comma, or two separate sentences. Zero dashes allowed.` },
+  { pattern: /\bmy (last |previous |earlier )?note\b/i, reason: `Don't say "my note" — a "note" implies an internal CRM record, not a real email. Reference the actual prior email's content (subject or specific topic) or open fresh.` },
   { pattern: /\bmy (last |previous )?message\b/i, reason: `Don't say "my message" — too vague. Reference the actual email's content specifically.` },
   { pattern: /\b(haven't|have not) heard back\b/i, reason: `Don't open with "haven't heard back" — it's a tired, weak sales opener. Lead with substance.` },
   { pattern: /\bjust (checking|circling|touching) (in|back|base)\b/i, reason: `"Just checking in / circling back / touching base" is banned — it's an empty opener.` },
@@ -613,11 +743,49 @@ const BANNED_PHRASE_PATTERNS: { pattern: RegExp; reason: string }[] = [
   { pattern: /\bfollowing up on (my|our) (note|message|email)\b/i, reason: `"Following up on my note/message/email" is banned. Reference the actual content, e.g. "On the React/AWS audit you asked about..."`},
 ];
 
+/**
+ * Enforces one-sentence-per-paragraph formatting. The prompt asks for this, but
+ * the model still bundles sentences together, so we reflow deterministically:
+ * split each paragraph on sentence boundaries (. ? !) and put a blank line
+ * between every sentence. Multi-line blocks (e.g. the "Best,\nChris" sign-off)
+ * are left intact.
+ */
+function reflowOneSentencePerParagraph(body: string): string {
+  const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const para of paragraphs) {
+    // Preserve intentional multi-line blocks (sign-off, address, lists).
+    if (para.includes("\n")) {
+      out.push(para);
+      continue;
+    }
+    const sentences = para
+      .split(/(?<=[.?!])\s+(?=["'A-ZÀ-Ż])/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    out.push(...sentences);
+  }
+  return out.join("\n\n");
+}
+
 function findBannedPhrases(text: string): string[] {
   const issues: string[] = [];
   for (const { pattern, reason } of BANNED_PHRASE_PATTERNS) {
     const m = text.match(pattern);
     if (m) issues.push(`Found "${m[0]}" — ${reason}`);
+  }
+  return issues;
+}
+
+/** Catches hallucinated booking links — any calendly.com URL that isn't the real one. */
+function findWrongLinks(text: string): string[] {
+  const issues: string[] = [];
+  const urls = text.match(/https?:\/\/[^\s)>\]}"']+/gi) ?? [];
+  for (const raw of urls) {
+    const url = raw.replace(/[.,;:!?]+$/, ""); // strip trailing punctuation
+    if (/calendly\.com/i.test(url) && url !== CALENDLY_URL) {
+      issues.push(`Found wrong booking link "${url}" — the ONLY valid Calendly link is ${CALENDLY_URL}. Use it exactly; never invent or alter a URL.`);
+    }
   }
   return issues;
 }
@@ -629,6 +797,8 @@ export async function draftFollowup(opts: {
   roles?: RoleContext;
   previousDraft?: FollowupDraft;
   feedback?: string;
+  /** Called when a banned-phrase retry fires, with the attempt number and the issues found. */
+  onRetry?: (attempt: number, issues: string[]) => void;
   _retry?: number;
 }): Promise<FollowupDraft> {
   const language = opts.language ?? "en";
@@ -662,6 +832,10 @@ ${opts.roles ? buildRoleBlock(opts.roles) + "\n\n" : ""}${languageDirective(lang
 
 ${SALES_APPROACH}
 
+${buildSchedulingRule(new Date())}
+
+${SCHEDULING_LINK_RULE}
+
 Use the contact's first name. Reference specific details from the deal context — never generic filler. Match the existing email thread style if there is one. If continuing a thread, use "Re: <original subject>".
 
 Before finalising: re-read your draft. If it sounds like a sales email or a LinkedIn post, rewrite it. If you used any banned phrase, rewrite it. If a sentence is longer than 20 words, split it.`,
@@ -690,8 +864,10 @@ Before finalising: re-read your draft. If it sounds like a sales email or a Link
   const draft = FollowupDraftSchema.parse(toolBlock.input);
 
   // Hard validation — check for banned phrases. Auto-retry with explicit feedback if found.
-  const issues = findBannedPhrases(`${draft.subject}\n${draft.body}`);
+  const validationText = `${draft.subject}\n${draft.body}`;
+  const issues = [...findBannedPhrases(validationText), ...findWrongLinks(validationText)];
   if (issues.length > 0 && retry < 2) {
+    opts.onRetry?.(retry + 1, issues);
     const retryFeedback = `Your draft contained banned phrases. Fix ALL of these and rewrite:\n${issues.map((i) => `- ${i}`).join("\n")}`;
     return draftFollowup({
       dealContext: opts.dealContext,
@@ -700,8 +876,69 @@ Before finalising: re-read your draft. If it sounds like a sales email or a Link
       roles: opts.roles,
       previousDraft: draft,
       feedback: retryFeedback,
+      onRetry: opts.onRetry,
       _retry: retry + 1,
     });
   }
-  return draft;
+  return { ...draft, body: reflowOneSentencePerParagraph(draft.body) };
+}
+
+/**
+ * Generates a fresh, standalone subject line for a follow-up that is NOT being
+ * attached to an existing Gmail thread. Unlike the threaded "Re: <original>"
+ * subject, this one must earn the open on its own: short, concrete, and tied to
+ * the client's actual need — no "Re:", no calendar-invite echo, no filler.
+ */
+export async function generateStandaloneSubject(opts: {
+  dealContext: string;
+  emailBody: string;
+  language?: Language;
+  roles?: RoleContext;
+}): Promise<string> {
+  const language = opts.language ?? "en";
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 200,
+    system: `You write the SUBJECT LINE for a standalone follow-up email (a brand-new thread, not a reply).
+
+${opts.roles ? buildRoleBlock(opts.roles) + "\n\n" : ""}${languageDirective(language)}
+
+The subject must earn the open on its own. Rules:
+- Anchor it to the client's actual need / project (use the concrete topic from the deal context — e.g. the product, the platform, the goal), not to us.
+- 3–6 words. Short enough to read fully on a phone. No trailing period.
+- Plain, human, lowercase-ish sentence case. Sound like a real person, not a marketing campaign.
+- NO "Re:", NO "Following up", NO "Checking in", NO "Quick question", NO calendar/event wording, NO em-dashes, NO clickbait, NO emojis.
+- It must fit the email body you are given — reference the same specific thing the email is about.
+
+Return only the subject via the tool.`,
+    messages: [
+      {
+        role: "user",
+        content: `DEAL CONTEXT:\n${opts.dealContext}\n\nEMAIL BODY (the subject must fit this):\n${opts.emailBody}`,
+      },
+    ],
+    tools: [
+      {
+        name: "subject_line",
+        description: "A short, standalone follow-up subject line",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            subject: { type: "string", description: "3-6 word subject, no Re:, tied to the client's need" },
+          },
+          required: ["subject"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "subject_line" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("No structured response from Claude");
+  const { subject } = z.object({ subject: z.string() }).parse(toolBlock.input);
+  return subject.replace(/^re:\s*/i, "").trim();
 }

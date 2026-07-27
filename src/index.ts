@@ -10,9 +10,11 @@ import { getYouTubeStats } from "./lib/youtube-stats.js";
 import { updateScorecard } from "./lib/scorecard.js";
 import { getEnv } from "./lib/env.js";
 import { getGmailClient, validateGmailCredentials, createDraft, searchEmails } from "./lib/gmail.js";
-import { getDealById, getDealContacts, getStagesMap } from "./lib/pipedrive.js";
+import { getDealById, getDealContacts, getStagesMap, createDealActivity, getActivityTypeKey } from "./lib/pipedrive.js";
 import { getGmailUserEmail } from "./lib/gmail.js";
-import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, type FollowupDraft, type RoleContext, type DealRecap } from "./lib/claude.js";
+import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, generateStandaloneSubject, analyzeFollowupLogs, type FollowupDraft, type RoleContext, type DealRecap, type FollowupInsights } from "./lib/claude.js";
+import { FollowupLogger, findLatestFollowupLog, listFollowupLogs, readFollowupLog, appendFollowupEvent } from "./lib/followup-logger.js";
+import { stripToBody, toLines, normalizeSubject, lineDiff } from "./lib/followup-review.js";
 
 const program = new Command();
 
@@ -115,6 +117,31 @@ program
     try {
       const dealId = parseDealId(idOrUrl);
       await runFollowupCommand(dealId, parseInt(opts.emailDays), parseInt(opts.maxEmails));
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("followup-review <idOrUrl>")
+  .description("After you sent a follow-up (manually edited in Gmail): compare the sent email against the generated draft and record the diff in the run log. Accepts a deal ID or Pipedrive deal URL.")
+  .action(async (idOrUrl: string) => {
+    try {
+      const dealId = parseDealId(idOrUrl);
+      await runReviewSentCommand(dealId);
+    } catch (err) {
+      console.error("\nError:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("followup-insights")
+  .description("Analyse all followup run logs (sent-vs-draft edits, in-loop feedback, validation retries) and print recommendations for improving the drafting prompt/agent. Read-only — proposes changes, never applies them.")
+  .action(async () => {
+    try {
+      await runFollowupInsightsCommand();
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
       process.exit(1);
@@ -276,6 +303,8 @@ function printDealAnalysis(result: DealAnalysisResult) {
 async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: number): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string) => rl.question(q);
+  const logger = new FollowupLogger(dealId);
+  logger.log("run_start", { dealId, emailDays, maxEmails });
 
   try {
     console.log(`\nGathering deal context for #${dealId}...`);
@@ -306,6 +335,15 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
     if (roles) console.log(`Sender: ${roles.senderName} → Recipient: ${roles.recipientName}\n`);
     else console.log();
 
+    logger.log("context", {
+      dealTitle: deal.title,
+      language,
+      sender: roles?.senderName,
+      recipient: roles?.recipientName,
+      recipientEmail: roles?.recipientEmail,
+      dealContext,
+    });
+
     // Recap + ideas in parallel — recap is shown first, ideas right after.
     console.log("Summarizing deal and generating 3 follow-up ideas...");
     const [recap, ideasResult] = await Promise.all([
@@ -314,6 +352,7 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
     ]);
     printDealRecap(recap);
     const { ideas } = ideasResult;
+    logger.log("recap_and_ideas", { recap, ideas });
     console.log();
     console.log();
     ideas.forEach((idea, i) => {
@@ -329,27 +368,41 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
       if (["1", "2", "3"].includes(choice)) {
         const idea = ideas[parseInt(choice) - 1];
         ideaBrief = `Angle: ${idea.angle}\nPurpose: ${idea.headline}\nWhy now: ${idea.rationale}`;
+        logger.log("idea_selected", { choice, angle: idea.angle, ideaBrief });
       } else if (choice === "4") {
         const custom = (await ask("Describe your follow-up idea: ")).trim();
-        if (custom) ideaBrief = `Custom idea from Chris: ${custom}`;
+        if (custom) {
+          ideaBrief = `Custom idea from Chris: ${custom}`;
+          logger.log("idea_selected", { choice: "custom", ideaBrief });
+        }
       } else {
         console.log("  (pick 1, 2, 3, or 4)");
       }
     }
 
-    let draft: FollowupDraft = await draftFollowup({ dealContext, ideaBrief, language, roles });
+    const onRetry = (attempt: number, issues: string[]) => logger.log("draft_retry", { attempt, issues });
+    let draftVersion = 1;
+    let draft: FollowupDraft = await draftFollowup({ dealContext, ideaBrief, language, roles, onRetry });
     printDraft(draft);
+    logger.log("draft", { version: draftVersion, subject: draft.subject, body: draft.body });
 
     while (true) {
       const answer = (await ask("\nFeedback (Enter = accept, or type changes / 'q' to quit): ")).trim();
-      if (answer === "") break;
+      if (answer === "") {
+        logger.log("draft_accepted", { version: draftVersion });
+        break;
+      }
       if (answer.toLowerCase() === "q") {
         console.log("Discarded. No draft saved.");
+        logger.log("discarded", { version: draftVersion });
         return;
       }
       console.log("Revising...");
-      draft = await draftFollowup({ dealContext, ideaBrief, language, roles, previousDraft: draft, feedback: answer });
+      logger.log("draft_feedback", { version: draftVersion, feedback: answer });
+      draft = await draftFollowup({ dealContext, ideaBrief, language, roles, previousDraft: draft, feedback: answer, onRetry });
+      draftVersion++;
       printDraft(draft);
+      logger.log("draft", { version: draftVersion, subject: draft.subject, body: draft.body });
     }
 
     const defaultTo = primary?.email ?? "";
@@ -357,8 +410,10 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
     const to = toAnswer || defaultTo;
     if (!to) {
       console.log("No recipient — skipping Gmail draft. Copy above and send manually.");
+      logger.log("no_recipient");
       return;
     }
+    logger.log("recipient", { to });
 
     // Look up the most recent Gmail thread with the recipient.
     let threadId: string | null = null;
@@ -379,6 +434,7 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
     } catch {
       // ignore — no prior thread
     }
+    logger.log("thread_lookup", { found: !!threadId, latestSubject, latestDate });
 
     // Interactive thread choice (only when a prior thread exists).
     if (threadId) {
@@ -393,10 +449,28 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
         references = null;
       }
     }
+    logger.log("thread_choice", { attach: !!threadId });
+
+    // Standalone (no thread): the "Re: <original>" subject won't fit a fresh
+    // thread. Generate a punchy subject tied to the client's need and let Chris
+    // tweak it before saving.
+    let finalSubject = draft.subject;
+    if (!threadId) {
+      console.log("\nStandalone email — generating a fresh subject line...");
+      let suggested = draft.subject;
+      try {
+        suggested = await generateStandaloneSubject({ dealContext, emailBody: draft.body, language, roles });
+      } catch {
+        // fall back to the model's subject
+      }
+      const subjAnswer = (await ask(`Subject [${suggested}] (Enter = accept, or type your own): `)).trim();
+      finalSubject = subjAnswer || suggested;
+      logger.log("standalone_subject", { generated: suggested, final: finalSubject, edited: !!subjAnswer });
+    }
 
     const result = await createDraft(gmail, {
       to,
-      subject: draft.subject,
+      subject: finalSubject,
       body: draft.body,
       threadId,
       inReplyTo,
@@ -405,15 +479,281 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
     const sigNote = result.signatureAppended ? " (signature appended)" : " (no signature — check Gmail settings or token scopes)";
     const threadNote = result.attachedToThread ? " — attached to existing thread" : " — standalone";
     console.log(`\nGmail draft saved${sigNote}${threadNote}.`);
+    logger.log("draft_saved", {
+      id: result.id,
+      url: result.url,
+      subject: finalSubject,
+      threadId: result.threadId,
+      messageId: result.messageId,
+      signatureAppended: result.signatureAppended,
+      attachedToThread: result.attachedToThread,
+    });
     if (result.url) {
       console.log(`Opening: ${result.url}`);
       openInBrowser(result.url);
     } else {
       console.log(`Open Gmail → Drafts (id: ${result.id})`);
     }
+
+    // Offer to log the follow-up as a Pipedrive activity on the deal.
+    const activityAnswer = (
+      await ask("\nAdd this follow-up as a Pipedrive activity on the deal? [Y/n]: ")
+    ).trim().toLowerCase();
+    if (activityAnswer !== "n" && activityAnswer !== "no") {
+      const today = new Date().toISOString().split("T")[0];
+      try {
+        const followUpType = (await getActivityTypeKey("Follow Up").catch(() => null)) ?? "task";
+        const activityId = await createDealActivity({
+          dealId,
+          subject: `Follow-up: ${finalSubject}`,
+          type: followUpType,
+          note: draft.body,
+          dueDate: today,
+          done: true,
+          personId: primary?.id || undefined,
+        });
+        console.log(activityId ? `Pipedrive activity created (id: ${activityId}).` : "Pipedrive activity created.");
+        logger.log("activity_added", { activityId, dealId });
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : err && typeof err === "object" && "error" in err
+              ? String((err as { error: unknown }).error)
+              : String(err);
+        console.log(`Could not create Pipedrive activity: ${msg}`);
+        logger.log("activity_error", { message: msg });
+      }
+
+      // Auto-review: capture what Chris changed vs the generated draft.
+      // Loops so he can send in Gmail first, then press Enter to record edits.
+      while (true) {
+        const ans = (
+          await ask("\nSend the email in Gmail, then press Enter to record your edits (or 's' to skip): ")
+        ).trim().toLowerCase();
+        if (ans === "s" || ans === "skip") {
+          logger.log("review_skipped");
+          break;
+        }
+        console.log("Looking for the sent email...");
+        const found = await reviewSentEmail({
+          gmail,
+          userEmail,
+          recipient: to,
+          generatedSubject: finalSubject,
+          generatedBody: draft.body,
+          threadId: result.threadId ?? null,
+          appendEvent: (type, data) => logger.log(type, data),
+        });
+        if (found) break;
+      }
+    } else {
+      logger.log("activity_skipped");
+    }
+
+    console.log(`\nRun log: ${logger.file}`);
+  } catch (err) {
+    logger.log("error", { message: err instanceof Error ? err.message : String(err) });
+    throw err;
   } finally {
     rl.close();
   }
+}
+
+/**
+ * Fetches the actually-sent follow-up, diffs it against the generated draft,
+ * prints the result, and records a `sent_review` event via `appendEvent`.
+ * Shared by the inline auto-review (inside `followup`) and the standalone
+ * `followup-review` command. Returns whether the sent email was found.
+ */
+async function reviewSentEmail(opts: {
+  gmail: Awaited<ReturnType<typeof getGmailClient>>;
+  userEmail: string;
+  recipient: string;
+  generatedSubject: string;
+  generatedBody: string;
+  threadId: string | null;
+  appendEvent: (type: string, data: Record<string, unknown>) => void;
+}): Promise<boolean> {
+  const candidates = await searchEmails(opts.gmail, opts.recipient, 30, 20);
+  const sent = candidates
+    .filter((m) => m.from.toLowerCase().includes(opts.userEmail.toLowerCase()))
+    .filter((m) => (opts.threadId ? m.threadId === opts.threadId : true))
+    .sort((a, b) => +new Date(b.date) - +new Date(a.date))[0];
+
+  if (!sent) {
+    console.log("No sent email found yet — is it still a draft, or not sent to this address? Run 'followup-review' after sending.");
+    opts.appendEvent("sent_review", { found: false });
+    return false;
+  }
+
+  const generated = stripToBody(opts.generatedBody);
+  const sentBody = stripToBody(sent.body);
+  const diff = lineDiff(toLines(generated), toLines(sentBody));
+  const bodyChanged = diff.some((d) => d.op !== " ");
+  const subjectChanged = normalizeSubject(sent.subject) !== normalizeSubject(opts.generatedSubject);
+
+  console.log("\n============ SENT vs DRAFT ============");
+  if (subjectChanged) {
+    console.log(`\nSubject changed:`);
+    console.log(`  - ${opts.generatedSubject}`);
+    console.log(`  + ${sent.subject}`);
+  } else {
+    console.log(`\nSubject unchanged: ${sent.subject}`);
+  }
+
+  console.log(`\nBody:`);
+  if (!bodyChanged) {
+    console.log("  (sent verbatim — no edits)");
+  } else {
+    for (const d of diff) {
+      console.log(`  ${d.op} ${d.text}`);
+    }
+  }
+  console.log("\n======================================");
+
+  opts.appendEvent("sent_review", {
+    found: true,
+    sentMessageId: sent.id,
+    sentDate: sent.date,
+    generatedSubject: opts.generatedSubject,
+    sentSubject: sent.subject,
+    subjectChanged,
+    bodyChanged,
+    generatedBody: generated,
+    sentBody,
+    diff,
+  });
+  return true;
+}
+
+async function runReviewSentCommand(dealId: number): Promise<void> {
+  const logFile = findLatestFollowupLog(dealId);
+  if (!logFile) {
+    console.log(`No followup run log found for deal #${dealId}. Run 'followup ${dealId}' first.`);
+    return;
+  }
+
+  const events = readFollowupLog(logFile);
+  const back = [...events].reverse();
+  const saved = back.find((e) => e.type === "draft_saved");
+  const lastDraft = back.find((e) => e.type === "draft");
+  const recipientEvent = back.find((e) => e.type === "recipient");
+  if (!saved || !lastDraft || !recipientEvent) {
+    console.log(`Run log ${logFile} is incomplete (no saved draft / recipient). Nothing to compare.`);
+    return;
+  }
+
+  const recipient = String(recipientEvent.to ?? "");
+  console.log(`\nLooking for the sent email to ${recipient}...`);
+  const gmail = await getGmailClient();
+  await validateGmailCredentials(gmail);
+  const userEmail = await getGmailUserEmail(gmail);
+
+  await reviewSentEmail({
+    gmail,
+    userEmail,
+    recipient,
+    generatedSubject: String(saved.subject ?? ""),
+    generatedBody: String(lastDraft.body ?? ""),
+    threadId: saved.threadId ? String(saved.threadId) : null,
+    appendEvent: (type, data) => appendFollowupEvent(logFile, type, data),
+  });
+  console.log(`\nRun log: ${logFile}`);
+}
+
+function buildInsightsDigest(): { text: string; reviewedEmails: number; retries: number; feedbacks: number } {
+  const files = listFollowupLogs();
+  const sections: string[] = [];
+  let reviewedEmails = 0;
+  let retries = 0;
+  let feedbacks = 0;
+
+  const weekday = (d?: string): string => {
+    if (!d) return "?";
+    const dt = new Date(d);
+    return Number.isNaN(+dt) ? "?" : `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dt.getDay()]} ${dt.toISOString().split("T")[0]}`;
+  };
+
+  for (const file of files) {
+    const events = readFollowupLog(file);
+    const dealId = /followup-(\d+)-/.exec(file)?.[1] ?? "?";
+    const parts: string[] = [];
+
+    const ctx = events.find((e) => e.type === "context");
+    const runStart = events.find((e) => e.type === "run_start");
+
+    // Latest sent_review per email (dedupe re-runs).
+    const review = [...events].reverse().find((e) => e.type === "sent_review" && e.found === true);
+    if (review) {
+      reviewedEmails++;
+      const edits = Array.isArray(review.diff)
+        ? (review.diff as { op: string; text: string }[]).filter((d) => d.op !== " ")
+        : [];
+      parts.push(`SENT-vs-DRAFT edits:`);
+      if (review.subjectChanged) parts.push(`  subject: "${review.generatedSubject}" -> "${review.sentSubject}"`);
+      for (const e of edits) parts.push(`  ${e.op} ${e.text}`);
+      if (!edits.length && !review.subjectChanged) parts.push(`  (sent verbatim)`);
+    }
+
+    const fb = events.filter((e) => e.type === "draft_feedback").map((e) => String(e.feedback));
+    if (fb.length) {
+      feedbacks += fb.length;
+      parts.push(`In-loop feedback: ${fb.map((f) => `"${f}"`).join("; ")}`);
+    }
+
+    const retryIssues = events
+      .filter((e) => e.type === "draft_retry")
+      .flatMap((e) => (Array.isArray(e.issues) ? (e.issues as string[]) : []));
+    if (retryIssues.length) {
+      retries += retryIssues.length;
+      parts.push(`Validation retries: ${retryIssues.join(" | ")}`);
+    }
+
+    const subj = [...events].reverse().find((e) => e.type === "standalone_subject");
+    if (subj && subj.edited) parts.push(`Standalone subject edited: "${subj.generated}" -> "${subj.final}"`);
+
+    if (parts.length) {
+      const contextLine = `Context: drafted ${weekday(runStart?.t as string | undefined)}${
+        review ? `, sent ${weekday(review.sentDate as string | undefined)}` : ""
+      }${ctx?.language ? `, language ${ctx.language}` : ""}`;
+      sections.push(`## Deal ${dealId}\n${contextLine}\n${parts.join("\n")}`);
+    }
+  }
+
+  const header = `Followup logs analysed: ${files.length}. Emails with a sent-vs-draft review: ${reviewedEmails}.`;
+  return { text: `${header}\n\n${sections.join("\n\n") || "(no actionable signal found)"}`, reviewedEmails, retries, feedbacks };
+}
+
+async function runFollowupInsightsCommand(): Promise<void> {
+  const digest = buildInsightsDigest();
+  console.log(`\n${digest.text}\n`);
+
+  if (digest.reviewedEmails === 0 && digest.retries === 0 && digest.feedbacks === 0) {
+    console.log("Not enough signal yet — send some follow-ups (auto-review captures your edits) and re-run.");
+    return;
+  }
+
+  console.log("Analysing patterns...\n");
+  const insights = await analyzeFollowupLogs(digest.text);
+  printInsights(insights);
+}
+
+function printInsights(insights: FollowupInsights): void {
+  console.log("============ FOLLOWUP INSIGHTS ============\n");
+  console.log(`Summary:\n  ${insights.summary}\n`);
+  if (!insights.recommendations.length) {
+    console.log("No concrete recommendations yet.");
+  } else {
+    insights.recommendations.forEach((r, i) => {
+      console.log(`[${i + 1}] ${r.pattern}  (confidence: ${r.confidence.toUpperCase()})`);
+      console.log(`     Evidence: ${r.evidence}`);
+      console.log(`     Change:   ${r.change}`);
+      console.log(`     Where:    ${r.location}\n`);
+    });
+  }
+  console.log("==========================================");
+  console.log("(Recommendations only — no code was changed.)");
 }
 
 function printDealRecap(recap: DealRecap): void {
