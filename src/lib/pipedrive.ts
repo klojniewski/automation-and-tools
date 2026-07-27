@@ -156,6 +156,32 @@ export async function createDealActivity(opts: {
   return response.data?.id ?? null;
 }
 
+/** Updates fields on an existing activity (partial — only passed fields change). */
+export async function updateDealActivity(
+  id: number,
+  opts: {
+    subject?: string;
+    note?: string;
+    dueDate?: string;
+    dueTime?: string;
+    done?: boolean;
+    type?: string;
+  },
+): Promise<void> {
+  const activitiesApi = new ActivitiesApi(createConfig());
+  await activitiesApi.updateActivity({
+    id,
+    AddActivityRequest: {
+      ...(opts.subject !== undefined ? { subject: opts.subject } : {}),
+      ...(opts.note !== undefined ? { note: opts.note } : {}),
+      ...(opts.dueDate ? { due_date: opts.dueDate } : {}),
+      ...(opts.dueTime ? { due_time: opts.dueTime } : {}),
+      ...(opts.done !== undefined ? { done: opts.done } : {}),
+      ...(opts.type ? { type: opts.type } : {}),
+    },
+  });
+}
+
 export async function fetchDealsInRange(
   pipelineId: number,
   startDate: string,

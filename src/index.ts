@@ -10,7 +10,8 @@ import { getYouTubeStats } from "./lib/youtube-stats.js";
 import { updateScorecard } from "./lib/scorecard.js";
 import { getEnv } from "./lib/env.js";
 import { getGmailClient, validateGmailCredentials, createDraft, searchEmails } from "./lib/gmail.js";
-import { getDealById, getDealContacts, getStagesMap, createDealActivity, getActivityTypeKey } from "./lib/pipedrive.js";
+import { getDealById, getDealContacts, getStagesMap } from "./lib/pipedrive.js";
+import { recordFollowupActivity } from "./lib/followup-activity.js";
 import { getGmailUserEmail } from "./lib/gmail.js";
 import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, generateStandaloneSubject, analyzeFollowupLogs, type FollowupDraft, type RoleContext, type DealRecap, type FollowupInsights } from "./lib/claude.js";
 import { FollowupLogger, findLatestFollowupLog, listFollowupLogs, readFollowupLog, appendFollowupEvent } from "./lib/followup-logger.js";
@@ -500,20 +501,21 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
       await ask("\nAdd this follow-up as a Pipedrive activity on the deal? [Y/n]: ")
     ).trim().toLowerCase();
     if (activityAnswer !== "n" && activityAnswer !== "no") {
-      const today = new Date().toISOString().split("T")[0];
       try {
-        const followUpType = (await getActivityTypeKey("Follow Up").catch(() => null)) ?? "task";
-        const activityId = await createDealActivity({
+        const activity = await recordFollowupActivity({
           dealId,
-          subject: `Follow-up: ${finalSubject}`,
-          type: followUpType,
+          emailSubject: finalSubject,
           note: draft.body,
-          dueDate: today,
-          done: true,
           personId: primary?.id || undefined,
         });
-        console.log(activityId ? `Pipedrive activity created (id: ${activityId}).` : "Pipedrive activity created.");
-        logger.log("activity_added", { activityId, dealId });
+        const verb = activity.done.mode === "updated" ? "Updated" : "Created";
+        console.log(`Pipedrive: ${verb} FL#${activity.done.number} (marked done).`);
+        if (activity.next.kind === "lost") {
+          console.log(`Scheduled TASK "No answers after 5 FL, mark LOST." for ${activity.next.dueDate}.`);
+        } else {
+          console.log(`Scheduled next FL#${activity.next.number} for ${activity.next.dueDate} (2 working days).`);
+        }
+        logger.log("activity_added", { ...activity, dealId });
       } catch (err) {
         const msg =
           err instanceof Error
