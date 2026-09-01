@@ -3,6 +3,7 @@ import "dotenv/config";
 
 export default defineConfig({
   project: process.env.TRIGGER_PROJECT_REF!,
+  runtime: "node-24",
   dirs: ["./src/trigger"],
   maxDuration: 300,
   build: {
