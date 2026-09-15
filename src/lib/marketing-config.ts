@@ -68,7 +68,7 @@ export const METRIC_COLUMN_MAP: Record<string, string> = {
   aiTraffic:                "Y",
   organic:                  "Z",
   organicActiveUsers:       "AA",
-  aiFormSent:               "AV",
+  aiFormSent:               "AC",
 };
 
 /**
@@ -97,26 +97,26 @@ export const CHANNEL_LABELS: Record<string, string> = {
  * Maps Pipedrive deals metric keys to Google Sheet column letters.
  */
 export const DEALS_COLUMN_MAP: Record<string, string> = {
-  dealsCreated:      "AP",
-  mql:               "AQ",
-  sql:               "AR",
-  channel_390_mql:   "AD",//Website / Organic
-  channel_390_sql:   "AE",//Website / Organic
-  channel_389_mql:   "AH",//Referral / Network
-  channel_389_sql:   "AI",//Referral / Network
-  channel_387_mql:   "AF",//AI Search
-  channel_387_sql:   "AG",//AI Search
-  channel_323_mql:   "AN",//Outreach
-  channel_323_sql:   "AO",//Outreach
-  channel_388_mql:   "AJ",//Paid Search
-  channel_388_sql:   "AK",//Paid Search
-  channel_318_mql:   "AL",//Marketplaces
-  channel_318_sql:   "AM",//Marketplaces
+  dealsCreated:      "AQ",
+  mql:               "AR",
+  sql:               "AS",
+  channel_390_mql:   "AE",//Website / Organic
+  channel_390_sql:   "AF",//Website / Organic
+  channel_389_mql:   "AI",//Referral / Network
+  channel_389_sql:   "AJ",//Referral / Network
+  channel_387_mql:   "AG",//AI Search
+  channel_387_sql:   "AH",//AI Search
+  channel_323_mql:   "AO",//Outreach
+  channel_323_sql:   "AP",//Outreach
+  channel_388_mql:   "AK",//Paid Search
+  channel_388_sql:   "AL",//Paid Search
+  channel_318_mql:   "AM",//Marketplaces
+  channel_318_sql:   "AN",//Marketplaces
 };
 
 /** Maps YouTube metric keys to Google Sheet column letters. */
 export const YOUTUBE_COLUMN_MAP: Record<string, string> = {
-  youtubeViews: "AC",
+  youtubeViews: "AD",
 };
 
 /**
@@ -141,28 +141,28 @@ export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   // Google Search Console
   gscClicks:                "AB",
 
+  // GA4
+  aiFormSent:               "AC",
+
   // YouTube
-  youtubeViews:             "AC",
+  youtubeViews:             "AD",
 
   // Pipedrive deals
-  channel_390_mql:          "AD", // Website / Organic
-  channel_390_sql:          "AE", // Website / Organic
-  channel_387_mql:          "AF", // AI Search
-  channel_387_sql:          "AG", // AI Search
-  channel_389_mql:          "AH", // Referral / Network
-  channel_389_sql:          "AI", // Referral / Network
-  channel_388_mql:          "AJ", // Paid Search
-  channel_388_sql:          "AK", // Paid Search
-  channel_318_mql:          "AL", // Marketplaces
-  channel_318_sql:          "AM", // Marketplaces
-  channel_323_mql:          "AN", // Outreach
-  channel_323_sql:          "AO", // Outreach
-  dealsCreated:             "AP",
-  mql:                      "AQ",
-  sql:                      "AR",
-
-  // GA4 — appended after the Pipedrive/SendGrid block (AS-AU = MOFU signups)
-  aiFormSent:               "AV",
+  channel_390_mql:          "AE", // Website / Organic
+  channel_390_sql:          "AF", // Website / Organic
+  channel_387_mql:          "AG", // AI Search
+  channel_387_sql:          "AH", // AI Search
+  channel_389_mql:          "AI", // Referral / Network
+  channel_389_sql:          "AJ", // Referral / Network
+  channel_388_mql:          "AK", // Paid Search
+  channel_388_sql:          "AL", // Paid Search
+  channel_318_mql:          "AM", // Marketplaces
+  channel_318_sql:          "AN", // Marketplaces
+  channel_323_mql:          "AO", // Outreach
+  channel_323_sql:          "AP", // Outreach
+  dealsCreated:             "AQ",
+  mql:                      "AR",
+  sql:                      "AS",
 };
 
 /** Metric labels in the order they appear in the Google Sheet columns. */
