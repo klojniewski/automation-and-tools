@@ -19,6 +19,9 @@ export const BOFU_PAGES = [
 /** Homepage is tracked separately because it uses EXACT match instead of CONTAINS. */
 export const HOMEPAGE_PATH = "/";
 
+/** Google Search Console property (domain property). */
+export const GSC_SITE_URL = "sc-domain:pagepro.co";
+
 /** Source strings that indicate AI-referred traffic. */
 export const AI_SOURCES = [
   "chatgpt",
@@ -64,6 +67,7 @@ export const METRIC_COLUMN_MAP: Record<string, string> = {
   paidTraffic:              "X",
   aiTraffic:                "Y",
   organic:                  "Z",
+  organicActiveUsers:       "AA",
 };
 
 /**
@@ -92,26 +96,26 @@ export const CHANNEL_LABELS: Record<string, string> = {
  * Maps Pipedrive deals metric keys to Google Sheet column letters.
  */
 export const DEALS_COLUMN_MAP: Record<string, string> = {
-  dealsCreated:      "AN",
-  mql:               "AO",
-  sql:               "AP",
-  channel_390_mql:   "AB",//Website / Organic
-  channel_390_sql:   "AC",//Website / Organic
-  channel_389_mql:   "AF",//Referral / Network
-  channel_389_sql:   "AG",//Referral / Network
-  channel_387_mql:   "AD",//AI Search
-  channel_387_sql:   "AE",//AI Search
-  channel_323_mql:   "AL",//Outreach
-  channel_323_sql:   "AM",//Outreach
-  channel_388_mql:   "AH",//Paid Search
-  channel_388_sql:   "AI",//Paid Search
-  channel_318_mql:   "AJ",//Marketplaces
-  channel_318_sql:   "AK",//Marketplaces
+  dealsCreated:      "AP",
+  mql:               "AQ",
+  sql:               "AR",
+  channel_390_mql:   "AD",//Website / Organic
+  channel_390_sql:   "AE",//Website / Organic
+  channel_389_mql:   "AH",//Referral / Network
+  channel_389_sql:   "AI",//Referral / Network
+  channel_387_mql:   "AF",//AI Search
+  channel_387_sql:   "AG",//AI Search
+  channel_323_mql:   "AN",//Outreach
+  channel_323_sql:   "AO",//Outreach
+  channel_388_mql:   "AJ",//Paid Search
+  channel_388_sql:   "AK",//Paid Search
+  channel_318_mql:   "AL",//Marketplaces
+  channel_318_sql:   "AM",//Marketplaces
 };
 
 /** Maps YouTube metric keys to Google Sheet column letters. */
 export const YOUTUBE_COLUMN_MAP: Record<string, string> = {
-  youtubeViews: "AA",
+  youtubeViews: "AC",
 };
 
 /**
@@ -131,26 +135,30 @@ export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   paidTraffic:              "X",
   aiTraffic:                "Y",
   organic:                  "Z",
+  organicActiveUsers:       "AA",
+
+  // Google Search Console
+  gscClicks:                "AB",
 
   // YouTube
-  youtubeViews:             "AA",
+  youtubeViews:             "AC",
 
   // Pipedrive deals
-  channel_390_mql:          "AB", // Website / Organic
-  channel_390_sql:          "AC", // Website / Organic
-  channel_387_mql:          "AD", // AI Search
-  channel_387_sql:          "AE", // AI Search
-  channel_389_mql:          "AF", // Referral / Network
-  channel_389_sql:          "AG", // Referral / Network
-  channel_388_mql:          "AH", // Paid Search
-  channel_388_sql:          "AI", // Paid Search
-  channel_318_mql:          "AJ", // Marketplaces
-  channel_318_sql:          "AK", // Marketplaces
-  channel_323_mql:          "AL", // Outreach
-  channel_323_sql:          "AM", // Outreach
-  dealsCreated:             "AN",
-  mql:                      "AO",
-  sql:                      "AP",
+  channel_390_mql:          "AD", // Website / Organic
+  channel_390_sql:          "AE", // Website / Organic
+  channel_387_mql:          "AF", // AI Search
+  channel_387_sql:          "AG", // AI Search
+  channel_389_mql:          "AH", // Referral / Network
+  channel_389_sql:          "AI", // Referral / Network
+  channel_388_mql:          "AJ", // Paid Search
+  channel_388_sql:          "AK", // Paid Search
+  channel_318_mql:          "AL", // Marketplaces
+  channel_318_sql:          "AM", // Marketplaces
+  channel_323_mql:          "AN", // Outreach
+  channel_323_sql:          "AO", // Outreach
+  dealsCreated:             "AP",
+  mql:                      "AQ",
+  sql:                      "AR",
 };
 
 /** Metric labels in the order they appear in the Google Sheet columns. */

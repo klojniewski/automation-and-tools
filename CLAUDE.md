@@ -67,7 +67,8 @@ npx tsx src/index.ts <command>
 - All marketing commands support `--week <YYWW>` and `--dry-run`
 
 **Scorecard metric notes:**
-- All traffic columns use **GA4 `sessions`** as the metric (Total Traffic, Organic, Direct, Referral, Paid, Blog, AI, BOFU, Not-Paid BOFU, Quality Traffic). Engagement Rate uses GA4's `engagementRate`.
+- All traffic columns use **GA4 `sessions`** as the metric (Total Traffic, Organic, Direct, Referral, Paid, Blog, AI, BOFU, Not-Paid BOFU, Quality Traffic). Engagement Rate uses GA4's `engagementRate`. Exception: **Organic Active Users** (column AA, inserted after Z on 2026-09-15 — all columns from old AA onward shifted +1) uses GA4 `activeUsers` for Organic Search + Social — same filter as the Organic sessions column (Z), added at Lukasz's request. Users are deduplicated per period, so weekly values must NOT be summed across weeks.
+- **GSC Clicks**: `src/lib/gsc.ts` `fetchGscClicks` — Search Console total clicks (web) for the week, property `sc-domain:pagepro.co` (`GSC_SITE_URL` in `marketing-config.ts`). Uses `dataState: "all"` (final + fresh) so it matches the GSC UI; recent days may settle slightly after finalization. Written to column AB ("Organic Total Clicks GSC", inserted 2026-09-15 — YouTube and Pipedrive columns shifted +1 again, now AC..AR). Backfilled W1+ via `scripts/backfill-gsc-clicks.ts`. Requires the service account to be a user on the GSC property + Search Console API enabled (done 2026-09-15). Note: GSC's "Generative AI features" report (AI Overviews impressions) is NOT available via API as of 2026-09 — UI/CSV only.
 - BOFU page set lives in `src/lib/marketing-config.ts` `BOFU_PAGES` — matched with **CONTAINS** (so query strings, trailing slashes, sub-pages all count). Homepage `/` is added separately via `HOMEPAGE_PATH` (EXACT match) — never put `/` in `BOFU_PAGES` because CONTAINS of `/` would match every URL.
 
 ### Trigger.dev Tasks

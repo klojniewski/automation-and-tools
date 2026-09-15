@@ -20,6 +20,7 @@ export interface GA4Metrics {
   totalBofu: number;
   notPaidBofu: number;
   organic: number;
+  organicActiveUsers: number;
   referral: number;
   direct: number;
   aiTraffic: number;
@@ -231,6 +232,11 @@ export async function fetchGA4Metrics(
           },
         }),
         baseReport(startDate, endDate, paidChannelFilter()),
+        {
+          dateRanges: [{ startDate, endDate }],
+          metrics: [{ name: "activeUsers" }],
+          dimensionFilter: channelIn(["Organic Search", "Organic Social"]),
+        },
       ],
     },
   });
@@ -255,6 +261,7 @@ export async function fetchGA4Metrics(
     totalBofu: val(r1, 1),
     notPaidBofu: val(r1, 2),
     organic: val(r1, 3),
+    organicActiveUsers: val(r3, 2),
     referral,
     direct,
     aiTraffic: val(r2, 2),

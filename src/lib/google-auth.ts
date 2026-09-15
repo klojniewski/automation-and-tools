@@ -3,6 +3,7 @@ import { google, type Auth } from "googleapis";
 const SA_SCOPES = [
   "https://www.googleapis.com/auth/analytics.readonly",
   "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/webmasters.readonly",
 ];
 
 let _saClient: Auth.OAuth2Client | Auth.GoogleAuth | null = null;

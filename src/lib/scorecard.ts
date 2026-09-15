@@ -1,6 +1,7 @@
 import { fetchGA4Metrics, type GA4Metrics } from "./ga4.js";
 import { fetchDealsInRange } from "./pipedrive.js";
 import { fetchYouTubeViews } from "./youtube.js";
+import { fetchGscClicks } from "./gsc.js";
 import { findRowByWeek, updateMappedCells } from "./sheets.js";
 import {
   SCORECARD_COLUMN_MAP,
@@ -52,6 +53,7 @@ function ga4ToRecord(m: GA4Metrics): Record<string, string | number> {
     totalBofu: m.totalBofu,
     notPaidBofu: m.notPaidBofu,
     organic: m.organic,
+    organicActiveUsers: m.organicActiveUsers,
     referral: m.referral,
     direct: m.direct,
     aiTraffic: m.aiTraffic,
@@ -96,6 +98,7 @@ export interface ScorecardResult {
   deals: { total: number; mql: number; sql: number };
   channels: Record<string, ChannelStats>;
   youtubeViews: number;
+  gscClicks: number;
 }
 
 export async function updateScorecard(options: {
@@ -106,10 +109,11 @@ export async function updateScorecard(options: {
   const pipelineId = options.pipeline ?? DEFAULT_PIPELINE;
   const { weekNum, startDate, endDate } = resolveWeek(options.week);
 
-  const [metrics, deals, youtubeViews] = await Promise.all([
+  const [metrics, deals, youtubeViews, gscClicks] = await Promise.all([
     fetchGA4Metrics(startDate, endDate),
     fetchDealsInRange(pipelineId, startDate, endDate, [MQL_FIELD_KEY, SQL_FIELD_KEY]),
     fetchYouTubeViews(startDate, endDate),
+    fetchGscClicks(startDate, endDate),
   ]);
 
   const { channels, totalMql, totalSql } = aggregateDeals(deals);
@@ -125,6 +129,7 @@ export async function updateScorecard(options: {
     deals: { total: deals.length, mql: totalMql, sql: totalSql },
     channels,
     youtubeViews,
+    gscClicks,
   };
 
   if (options.dryRun) return base;
@@ -136,6 +141,9 @@ export async function updateScorecard(options: {
     ...ga4ToRecord(metrics),
     ...dealsToRecord(deals, channels, totalMql, totalSql),
     youtubeViews,
+    // gscClicks is written only once its column mapping exists in SCORECARD_COLUMN_MAP
+    // (updateMappedCells silently skips keys with no mapped column)
+    gscClicks,
   };
 
   await updateMappedCells(rowNum, allData, SCORECARD_COLUMN_MAP);

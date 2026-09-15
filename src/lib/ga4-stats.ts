@@ -10,6 +10,7 @@ function metricsToRecord(m: GA4Metrics): Record<string, string | number> {
     totalBofu: m.totalBofu,
     notPaidBofu: m.notPaidBofu,
     organic: m.organic,
+    organicActiveUsers: m.organicActiveUsers,
     referral: m.referral,
     direct: m.direct,
     aiTraffic: m.aiTraffic,
