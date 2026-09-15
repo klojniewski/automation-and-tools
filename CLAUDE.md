@@ -77,7 +77,8 @@ All task definitions live in `src/trigger/`:
 
 | Task ID | File | Machine | Schedule |
 |---------|------|---------|----------|
-| `update-scorecard` | `update-scorecard.ts` | micro, 120s | weekly |
+| `weekly-scorecard` | `weekly-scorecard.ts` | micro, 120s | Tue 10:00 Europe/Warsaw (declarative cron) |
+| `update-scorecard` | `update-scorecard.ts` | micro, 120s | on-demand (Sheets menu / dashboard) |
 | `analyze-deals` | `analyze-deals.ts` | small-1x, 300s | on-demand |
 | `get-pipedrive-deals` | `get-pipedrive-deals.ts` | micro, 120s | on-demand |
 | `get-ga4-stats` | `get-ga4-stats.ts` | micro | on-demand |
