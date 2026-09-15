@@ -25,6 +25,7 @@ export const GSC_SITE_URL = "sc-domain:pagepro.co";
 /** Source strings that indicate AI-referred traffic. */
 export const AI_SOURCES = [
   "chatgpt",
+  "openai",
   "claude",
   "gemini",
   "perplexity",
