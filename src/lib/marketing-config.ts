@@ -68,6 +68,7 @@ export const METRIC_COLUMN_MAP: Record<string, string> = {
   aiTraffic:                "Y",
   organic:                  "Z",
   organicActiveUsers:       "AA",
+  aiFormSent:               "AV",
 };
 
 /**
@@ -159,6 +160,9 @@ export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   dealsCreated:             "AP",
   mql:                      "AQ",
   sql:                      "AR",
+
+  // GA4 — appended after the Pipedrive/SendGrid block (AS-AU = MOFU signups)
+  aiFormSent:               "AV",
 };
 
 /** Metric labels in the order they appear in the Google Sheet columns. */

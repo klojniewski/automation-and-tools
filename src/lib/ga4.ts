@@ -29,6 +29,7 @@ export interface GA4Metrics {
   qualityTraffic: number;
   blogTraffic: number;
   paidTraffic: number;
+  aiFormSent: number;
 }
 
 // ── Filter helpers ──────────────────────────────────────────
@@ -74,6 +75,15 @@ function pagePathRegex(value: string): FilterExpression {
     filter: {
       fieldName: "pagePathPlusQueryString",
       stringFilter: { matchType: "FULL_REGEXP", value: `^${value}($|\\?)` },
+    },
+  };
+}
+
+function eventNameEquals(value: string): FilterExpression {
+  return {
+    filter: {
+      fieldName: "eventName",
+      stringFilter: { matchType: "EXACT", value },
     },
   };
 }
@@ -237,6 +247,18 @@ export async function fetchGA4Metrics(
           metrics: [{ name: "activeUsers" }],
           dimensionFilter: channelIn(["Organic Search", "Organic Social"]),
         },
+        {
+          dateRanges: [{ startDate, endDate }],
+          metrics: [{ name: "eventCount" }],
+          dimensionFilter: {
+            andGroup: {
+              expressions: [
+                eventNameEquals("form_sent"),
+                { orGroup: { expressions: AI_SOURCES.map(sourceContains) } },
+              ],
+            },
+          },
+        },
       ],
     },
   });
@@ -274,5 +296,6 @@ export async function fetchGA4Metrics(
     qualityTraffic,
     blogTraffic: val(r3, 0),
     paidTraffic: val(r3, 1),
+    aiFormSent: val(r3, 3),
   };
 }

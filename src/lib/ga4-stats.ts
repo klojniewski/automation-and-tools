@@ -19,6 +19,7 @@ function metricsToRecord(m: GA4Metrics): Record<string, string | number> {
     qualityTraffic: m.qualityTraffic,
     blogTraffic: m.blogTraffic,
     paidTraffic: m.paidTraffic,
+    aiFormSent: m.aiFormSent,
   };
 }
 
