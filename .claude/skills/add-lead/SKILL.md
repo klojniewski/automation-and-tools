@@ -45,7 +45,11 @@ Turn an inbound lead email into a complete Pipedrive record: organization + pers
 | Org | Industry | `industry` | enum, e.g. 17=Technology, information and media (full list: `GET /organizationFields`) |
 | Org | Industry (legacy) | `6ba915c00a13c9d206955cab12ddc7c855d61cc9` | enum, e.g. 119=Online Media, 28=Automotive, 44=Computer Software |
 
-Deal value: set it when the email states a number — a budget ("$80k"), or hours × rate — and flag it in the report; leave empty (and say so) when nothing is stated. Currency comes from the email ($→USD, £→GBP, zł→PLN) via the deal's `currency` field — never a hardcoded default.
+Deal value (decided 2026-09-17, mirrors the n8n "INBOUND Leads Processing" estimator):
+1. **Email states a number** (budget, or hours × rate) → use it; currency from the email ($→USD, £→GBP, zł→PLN).
+2. **No number stated but the scope is clear** → **estimate the full project value** as a round number, the way the n8n workflow does (its whole rubric is one line: "estimated value in GBP or 0" judged by the model). Calibrate against recent comparable deals in the pipeline (e.g. website rebuild ~15–45k GBP, mobile app new build ~40k GBP, vibe-to-live takeover ~25k, migrations ~35–45k). Currency = the client's likely currency inferred from country/domain (never hardcode GBP — that's a known n8n bug).
+3. **No basis at all** (vague/spam-ish) → leave empty.
+In every case: **flag the value in the report as stated vs estimated** so Chris can correct it.
 
 If an option id is rejected or a field looks stale, re-fetch definitions: `GET /dealFields`, `/personFields`, `/organizationFields`.
 
