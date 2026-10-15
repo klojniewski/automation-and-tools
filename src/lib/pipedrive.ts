@@ -91,11 +91,16 @@ export async function getDealContacts(
   }));
 }
 
-export async function getOrgName(orgId: number): Promise<string | null> {
+/** Org name + human-readable location (e.g. "Milan, Italy") — location is null when the org has no address. */
+export async function getOrgInfo(orgId: number): Promise<{ name: string; location: string | null } | null> {
   try {
     const orgsApi = new OrganizationsApi(createConfig());
     const response = await orgsApi.getOrganization({ id: orgId });
-    return response.data?.name ?? null;
+    const org = response.data as any;
+    if (!org?.name) return null;
+    const address = org.address ?? {}; // v2: { value, locality, country, formatted_address, ... }
+    const cityCountry = [address.locality, address.country].filter(Boolean).join(", ");
+    return { name: org.name, location: cityCountry || address.value || null };
   } catch {
     return null;
   }

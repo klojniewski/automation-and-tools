@@ -13,7 +13,8 @@ import { getGmailClient, validateGmailCredentials, createDraft, searchEmails } f
 import { getDealById, getDealContacts, getStagesMap } from "./lib/pipedrive.js";
 import { recordFollowupActivity } from "./lib/followup-activity.js";
 import { getGmailUserEmail } from "./lib/gmail.js";
-import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, generateStandaloneSubject, analyzeFollowupLogs, type FollowupDraft, type RoleContext, type DealRecap, type FollowupInsights } from "./lib/claude.js";
+import { generateFollowupIdeas, draftFollowup, detectLanguage, summarizeDealForReview, generateStandaloneSubjects, analyzeFollowupLogs, distillFeedbackLessons, type FollowupDraft, type RoleContext, type DealRecap, type FollowupInsights } from "./lib/claude.js";
+import { loadLessonLines, appendLessons, LESSONS_FILE, type Lesson } from "./lib/followup-lessons.js";
 import { FollowupLogger, findLatestFollowupLog, listFollowupLogs, readFollowupLog, appendFollowupEvent } from "./lib/followup-logger.js";
 import { stripToBody, toLines, normalizeSubject, lineDiff } from "./lib/followup-review.js";
 
@@ -301,6 +302,52 @@ function printDealAnalysis(result: DealAnalysisResult) {
   }
 }
 
+/**
+ * End-of-loop learning step: when Chris gave feedback on the drafts, distill it
+ * into reusable lessons and ask which to save to docs/followup-lessons.md (they
+ * are injected into every future draft prompt). Never breaks the command.
+ */
+async function offerFeedbackLessons(opts: {
+  ask: (q: string) => Promise<string>;
+  logger: FollowupLogger;
+  dealId: number;
+  ideaBrief: string;
+  revisions: { draft: FollowupDraft; feedback: string }[];
+  finalDraft: FollowupDraft;
+  outcome: "accepted" | "discarded";
+}): Promise<void> {
+  if (opts.revisions.length === 0) return;
+  try {
+    console.log("\nDistilling your feedback into lessons for future drafts...");
+    const candidates = await distillFeedbackLessons({
+      ideaBrief: opts.ideaBrief,
+      revisions: opts.revisions,
+      finalDraft: opts.finalDraft,
+      outcome: opts.outcome,
+      existingLessons: loadLessonLines(),
+    });
+    opts.logger.log("lessons_proposed", { lessons: candidates });
+    if (candidates.length === 0) {
+      console.log("  (nothing reusable beyond this deal)");
+      return;
+    }
+    const saved: Lesson[] = [];
+    for (const lesson of candidates) {
+      console.log(`\n  [${lesson.class}] ${lesson.rule}`);
+      const answer = (await opts.ask("  Save? [y/N, or type a corrected rule]: ")).trim();
+      if (/^(y|yes|t|tak)$/i.test(answer)) saved.push(lesson);
+      else if (answer && !/^(n|no|nie)$/i.test(answer)) saved.push({ class: lesson.class, rule: answer });
+    }
+    appendLessons(saved, `deal #${opts.dealId}, ${new Date().toISOString().split("T")[0]}`);
+    opts.logger.log("lessons_saved", { lessons: saved });
+    if (saved.length > 0) console.log(`\nSaved ${saved.length} lesson(s) to ${LESSONS_FILE}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    opts.logger.log("lessons_error", { message: msg });
+    console.log(`  (couldn't distill lessons: ${msg})`);
+  }
+}
+
 async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: number): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string) => rl.question(q);
@@ -383,6 +430,7 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
 
     const onRetry = (attempt: number, issues: string[]) => logger.log("draft_retry", { attempt, issues });
     let draftVersion = 1;
+    const revisions: { draft: FollowupDraft; feedback: string }[] = [];
     let draft: FollowupDraft = await draftFollowup({ dealContext, ideaBrief, language, roles, onRetry });
     printDraft(draft);
     logger.log("draft", { version: draftVersion, subject: draft.subject, body: draft.body });
@@ -391,16 +439,19 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
       const answer = (await ask("\nFeedback (Enter = accept, or type changes / 'q' to quit): ")).trim();
       if (answer === "") {
         logger.log("draft_accepted", { version: draftVersion });
+        await offerFeedbackLessons({ ask, logger, dealId, ideaBrief, revisions, finalDraft: draft, outcome: "accepted" });
         break;
       }
       if (answer.toLowerCase() === "q") {
         console.log("Discarded. No draft saved.");
         logger.log("discarded", { version: draftVersion });
+        await offerFeedbackLessons({ ask, logger, dealId, ideaBrief, revisions, finalDraft: draft, outcome: "discarded" });
         return;
       }
       console.log("Revising...");
       logger.log("draft_feedback", { version: draftVersion, feedback: answer });
-      draft = await draftFollowup({ dealContext, ideaBrief, language, roles, previousDraft: draft, feedback: answer, onRetry });
+      revisions.push({ draft, feedback: answer });
+      draft = await draftFollowup({ dealContext, ideaBrief, language, roles, revisions, onRetry });
       draftVersion++;
       printDraft(draft);
       logger.log("draft", { version: draftVersion, subject: draft.subject, body: draft.body });
@@ -453,20 +504,39 @@ async function runFollowupCommand(dealId: number, emailDays: number, maxEmails: 
     logger.log("thread_choice", { attach: !!threadId });
 
     // Standalone (no thread): the "Re: <original>" subject won't fit a fresh
-    // thread. Generate a punchy subject tied to the client's need and let Chris
-    // tweak it before saving.
+    // thread. Generate 3 subjects tied to the client's need; Chris picks one or
+    // writes his own (same picker as the follow-up ideas).
     let finalSubject = draft.subject;
     if (!threadId) {
-      console.log("\nStandalone email — generating a fresh subject line...");
-      let suggested = draft.subject;
+      console.log("\nStandalone email — generating 3 subject lines...");
+      let options: string[] = [];
       try {
-        suggested = await generateStandaloneSubject({ dealContext, emailBody: draft.body, language, roles });
+        options = await generateStandaloneSubjects({ dealContext, emailBody: draft.body, language, roles });
       } catch {
-        // fall back to the model's subject
+        // fall back to the model's own subject below
       }
-      const subjAnswer = (await ask(`Subject [${suggested}] (Enter = accept, or type your own): `)).trim();
-      finalSubject = subjAnswer || suggested;
-      logger.log("standalone_subject", { generated: suggested, final: finalSubject, edited: !!subjAnswer });
+      if (options.length === 0) options = [draft.subject.replace(/^re:\s*/i, "").trim()];
+      console.log();
+      options.forEach((subj, i) => console.log(`  [${i + 1}] ${subj}`));
+      const ownKey = String(options.length + 1);
+      console.log(`  [${ownKey}] Write my own subject\n`);
+
+      let choice = "";
+      let picked = "";
+      while (!picked) {
+        choice = (await ask(`Pick 1-${ownKey}: `)).trim();
+        const n = parseInt(choice, 10);
+        if (choice === ownKey) picked = (await ask("Your subject: ")).trim();
+        else if (n >= 1 && n <= options.length) picked = options[n - 1];
+        else console.log(`  (pick 1-${ownKey})`);
+      }
+      finalSubject = picked;
+      logger.log("standalone_subject", {
+        generated: options,
+        choice,
+        final: finalSubject,
+        edited: choice === ownKey,
+      });
     }
 
     const result = await createDraft(gmail, {
@@ -713,7 +783,11 @@ function buildInsightsDigest(): { text: string; reviewedEmails: number; retries:
     }
 
     const subj = [...events].reverse().find((e) => e.type === "standalone_subject");
-    if (subj && subj.edited) parts.push(`Standalone subject edited: "${subj.generated}" -> "${subj.final}"`);
+    if (subj && subj.edited) {
+      // `generated` is a string in older logs, an array of 3 options since the subject picker
+      const generated = Array.isArray(subj.generated) ? (subj.generated as string[]).join('" | "') : String(subj.generated);
+      parts.push(`Standalone subject written by Chris instead of the options: "${generated}" -> "${subj.final}"`);
+    }
 
     if (parts.length) {
       const contextLine = `Context: drafted ${weekday(runStart?.t as string | undefined)}${

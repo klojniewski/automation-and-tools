@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { getEnv } from "./env.js";
+import { buildLessonsBlock, type Lesson } from "./followup-lessons.js";
 
 export const DealPrioritySchema = z.object({
   deals: z.array(
@@ -632,7 +633,7 @@ TWO KINDS OF RULE — judge sample size differently:
 RULES:
 - Only surface a pattern that actually appears in the data. Quote the evidence, including the relevant Context (e.g. "sent on a Monday").
 - Prioritise: put the most important learnable rule first. Don't bury a clear logical rule under low-confidence noise.
-- For each recommendation give: the pattern, the evidence (context + how many emails + short example), a confidence, the concrete change, and WHERE. Valid locations: "SALES_APPROACH (claude.ts)", "buildSchedulingRule (claude.ts)", "BANNED_PHRASE_PATTERNS (claude.ts)", "reflow (claude.ts)", "generateStandaloneSubject (claude.ts)", "validation", or "none — watch".
+- For each recommendation give: the pattern, the evidence (context + how many emails + short example), a confidence, the concrete change, and WHERE. Valid locations: "SALES_APPROACH (claude.ts)", "buildSchedulingRule (claude.ts)", "BANNED_PHRASE_PATTERNS (claude.ts)", "reflow (claude.ts)", "generateStandaloneSubjects (claude.ts)", "validation", or "none — watch".
 - If the data is too thin for any change, say so in the summary.`,
     messages: [{ role: "user", content: digest }],
     tools: [
@@ -790,13 +791,18 @@ function findWrongLinks(text: string): string[] {
   return issues;
 }
 
+const BRIEF_PRIORITY_RULE = `BRIEF PRIORITY:
+- The FOLLOW-UP BRIEF is the instruction; the DEAL CONTEXT is background facts. When they pull in different directions, the brief wins.
+- A "Custom idea from Chris" brief is his own intent: keep its purpose and tone exactly. Do not add asks, pressure or urgency (calls, proposals, deadlines, "where do we stand") that the brief does not request, even if the deal context suggests the deal needs pushing.
+- Before any personal or local reference (travel, weather, holidays), check the organization's Location in the deal context and write it so it fits where the prospect actually is.`;
+
 export async function draftFollowup(opts: {
   dealContext: string;
   ideaBrief: string;
   language?: Language;
   roles?: RoleContext;
-  previousDraft?: FollowupDraft;
-  feedback?: string;
+  /** Every earlier draft with the feedback given on it, oldest first — all of it stays in play, not just the last round. */
+  revisions?: { draft: FollowupDraft; feedback: string }[];
   /** Called when a banned-phrase retry fires, with the attempt number and the issues found. */
   onRetry?: (attempt: number, issues: string[]) => void;
   _retry?: number;
@@ -810,16 +816,17 @@ export async function draftFollowup(opts: {
     { role: "user", content: `DEAL CONTEXT:\n${opts.dealContext}\n\nFOLLOW-UP BRIEF:\n${opts.ideaBrief}` },
   ];
 
-  if (opts.previousDraft && opts.feedback) {
+  for (const rev of opts.revisions ?? []) {
     messages.push({
       role: "assistant",
-      content: `Subject: ${opts.previousDraft.subject}\n\n${opts.previousDraft.body}`,
+      content: `Subject: ${rev.draft.subject}\n\n${rev.draft.body}`,
     });
     messages.push({
       role: "user",
-      content: `Revise the email based on this feedback:\n${opts.feedback}`,
+      content: `Revise the email based on this feedback (earlier feedback in this conversation still applies):\n${rev.feedback}`,
     });
   }
+  const lessonsBlock = buildLessonsBlock();
 
   const response = await anthropic.messages.create({
     model: "claude-opus-4-7",
@@ -836,6 +843,8 @@ ${buildSchedulingRule(new Date())}
 
 ${SCHEDULING_LINK_RULE}
 
+${BRIEF_PRIORITY_RULE}
+${lessonsBlock ? `\n${lessonsBlock}\n` : ""}
 Use the contact's first name. Reference specific details from the deal context — never generic filler. Match the existing email thread style if there is one. If continuing a thread, use "Re: <original subject>".
 
 Before finalising: re-read your draft. If it sounds like a sales email or a LinkedIn post, rewrite it. If you used any banned phrase, rewrite it. If a sentence is longer than 20 words, split it.`,
@@ -874,8 +883,7 @@ Before finalising: re-read your draft. If it sounds like a sales email or a Link
       ideaBrief: opts.ideaBrief,
       language: opts.language,
       roles: opts.roles,
-      previousDraft: draft,
-      feedback: retryFeedback,
+      revisions: [...(opts.revisions ?? []), { draft, feedback: retryFeedback }],
       onRetry: opts.onRetry,
       _retry: retry + 1,
     });
@@ -883,25 +891,102 @@ Before finalising: re-read your draft. If it sounds like a sales email or a Link
   return { ...draft, body: reflowOneSentencePerParagraph(draft.body) };
 }
 
+export const FeedbackLessonsSchema = z.object({
+  lessons: z.array(
+    z.object({
+      class: z.enum(["truth", "voice", "hypothesis"]),
+      rule: z.string(),
+    }),
+  ),
+});
+
 /**
- * Generates a fresh, standalone subject line for a follow-up that is NOT being
- * attached to an existing Gmail thread. Unlike the threaded "Re: <original>"
- * subject, this one must earn the open on its own: short, concrete, and tied to
- * the client's actual need — no "Re:", no calendar-invite echo, no filler.
+ * Distills Chris's in-loop feedback from one `followup` run into 0-3 reusable,
+ * deal-agnostic lessons for `docs/followup-lessons.md`. Proposes only — the CLI
+ * asks Chris which ones to save.
  */
-export async function generateStandaloneSubject(opts: {
+export async function distillFeedbackLessons(opts: {
+  ideaBrief: string;
+  revisions: { draft: FollowupDraft; feedback: string }[];
+  finalDraft: FollowupDraft;
+  outcome: "accepted" | "discarded";
+  existingLessons: string[];
+}): Promise<Lesson[]> {
+  const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
+  const rounds = opts.revisions
+    .map((r, i) => `--- Draft v${i + 1} ---\nSubject: ${r.draft.subject}\n\n${r.draft.body}\n\n>>> Chris's feedback on v${i + 1}: ${r.feedback}`)
+    .join("\n\n");
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    system: `You turn a salesperson's (Chris's) feedback on AI-drafted follow-up emails into reusable rules for the drafting prompt.
+
+Rules for the rules:
+- 0 to 3 lessons. Zero is a valid answer when the feedback was a one-off content tweak for this deal only.
+- Generalize: a lesson must help on OTHER deals. Name the underlying mistake, not this deal's details (e.g. "check the prospect's location before a local reference", not "Nadia is Italian").
+- One sentence each, imperative, in English, even if the feedback was in Polish. Feedback may be blunt; extract what was wrong.
+- Classify each: "truth" = facts, following Chris's brief, not inventing things (absolute); "voice" = Chris's style preference; "hypothesis" = a guess about what earns replies.
+- Skip anything already covered by an existing lesson.`,
+    messages: [
+      {
+        role: "user",
+        content: `BRIEF:\n${opts.ideaBrief}\n\nDRAFTS AND FEEDBACK:\n${rounds}\n\n--- Final draft (${opts.outcome}) ---\nSubject: ${opts.finalDraft.subject}\n\n${opts.finalDraft.body}\n\nEXISTING LESSONS:\n${opts.existingLessons.join("\n") || "(none)"}`,
+      },
+    ],
+    tools: [
+      {
+        name: "feedback_lessons",
+        description: "Reusable lessons distilled from the feedback",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            lessons: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  class: { type: "string", enum: ["truth", "voice", "hypothesis"] },
+                  rule: { type: "string", description: "One imperative sentence, deal-agnostic" },
+                },
+                required: ["class", "rule"],
+              },
+            },
+          },
+          required: ["lessons"],
+        },
+      },
+    ],
+    tool_choice: { type: "tool", name: "feedback_lessons" },
+  });
+
+  const toolBlock = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolBlock) return [];
+  return FeedbackLessonsSchema.parse(toolBlock.input).lessons.slice(0, 3);
+}
+
+/**
+ * Generates 3 distinct standalone subject lines for a follow-up that is NOT
+ * being attached to an existing Gmail thread (Chris picks one or writes his own).
+ * Unlike the threaded "Re: <original>" subject, these must earn the open on
+ * their own: short, concrete, and tied to the client's actual need — no "Re:",
+ * no calendar-invite echo, no filler.
+ */
+export async function generateStandaloneSubjects(opts: {
   dealContext: string;
   emailBody: string;
   language?: Language;
   roles?: RoleContext;
-}): Promise<string> {
+}): Promise<string[]> {
   const language = opts.language ?? "en";
   const anthropic = new Anthropic({ apiKey: getEnv().ANTHROPIC_API_KEY });
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 200,
-    system: `You write the SUBJECT LINE for a standalone follow-up email (a brand-new thread, not a reply).
+    max_tokens: 400,
+    system: `You write 3 alternative SUBJECT LINES for a standalone follow-up email (a brand-new thread, not a reply).
 
 ${opts.roles ? buildRoleBlock(opts.roles) + "\n\n" : ""}${languageDirective(language)}
 
@@ -911,8 +996,9 @@ The subject must earn the open on its own. Rules:
 - Plain, human, lowercase-ish sentence case. Sound like a real person, not a marketing campaign.
 - NO "Re:", NO "Following up", NO "Checking in", NO "Quick question", NO calendar/event wording, NO em-dashes, NO clickbait, NO emojis.
 - It must fit the email body you are given — reference the same specific thing the email is about.
+- The 3 options must be genuinely different (e.g. one about the project/goal, one about the question the email asks, one about the timing or next step), not rewordings of each other.
 
-Return only the subject via the tool.`,
+Return only the 3 subjects via the tool.`,
     messages: [
       {
         role: "user",
@@ -921,24 +1007,29 @@ Return only the subject via the tool.`,
     ],
     tools: [
       {
-        name: "subject_line",
-        description: "A short, standalone follow-up subject line",
+        name: "subject_lines",
+        description: "3 distinct short, standalone follow-up subject lines",
         input_schema: {
           type: "object" as const,
           properties: {
-            subject: { type: "string", description: "3-6 word subject, no Re:, tied to the client's need" },
+            subjects: {
+              type: "array",
+              items: { type: "string", description: "3-6 word subject, no Re:, tied to the client's need" },
+              minItems: 3,
+              maxItems: 3,
+            },
           },
-          required: ["subject"],
+          required: ["subjects"],
         },
       },
     ],
-    tool_choice: { type: "tool", name: "subject_line" },
+    tool_choice: { type: "tool", name: "subject_lines" },
   });
 
   const toolBlock = response.content.find(
     (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
   );
   if (!toolBlock) throw new Error("No structured response from Claude");
-  const { subject } = z.object({ subject: z.string() }).parse(toolBlock.input);
-  return subject.replace(/^re:\s*/i, "").trim();
+  const { subjects } = z.object({ subjects: z.array(z.string()) }).parse(toolBlock.input);
+  return subjects.map((s) => s.replace(/^re:\s*/i, "").trim()).filter(Boolean).slice(0, 3);
 }

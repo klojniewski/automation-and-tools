@@ -5,7 +5,7 @@ import {
   getDealContacts,
   getDealActivities,
   getStagesMap,
-  getOrgName,
+  getOrgInfo,
   getTimelineNote,
   upsertTimelineNote,
   formatFullTimelineHtml,
@@ -127,10 +127,10 @@ export async function enrichDeal(
   const dealId = deal.id ?? 0;
 
   // Fetch contacts, activities, org name, and timeline note in parallel
-  const [contacts, activities, orgName, timelineNote] = await Promise.all([
+  const [contacts, activities, orgInfo, timelineNote] = await Promise.all([
     getDealContacts(dealId).catch((): DealContact[] => []),
     getDealActivities(dealId, 10).catch((): any[] => []),
-    deal.org_id ? getOrgName(deal.org_id) : Promise.resolve(null),
+    deal.org_id ? getOrgInfo(deal.org_id) : Promise.resolve(null),
     getTimelineNote(dealId).catch(() => null),
   ]);
 
@@ -232,7 +232,7 @@ export async function enrichDeal(
     : "";
 
   return `DEAL #${dealId}: ${deal.title}
-Organization: ${orgName ?? "Unknown"}
+Organization: ${orgInfo?.name ?? "Unknown"}${orgInfo?.location ? ` | Location: ${orgInfo.location}` : ""}
 Value: ${deal.value ?? 0} ${deal.currency ?? ""} | Stage: ${stageName} | Probability: ${deal.probability ?? "N/A"}%
 Days since update: ${daysSinceUpdate} | Today: ${today}
 Contacts: ${contactsList}
