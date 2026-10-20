@@ -223,12 +223,14 @@ marketing
   .option("-w, --week <YYWW>", "Year+week, e.g. 2606 (default: last completed week)")
   .option("-p, --pipeline <id>", "Pipedrive pipeline ID", "22")
   .option("--dry-run", "Show data without writing to Sheet")
+  .option("--settle <n>", "Also re-fetch YouTube views for N previous weeks (0 = off)", "3")
   .action(async (opts) => {
     try {
       const result = await updateScorecard({
         week: opts.week,
         pipeline: parseInt(opts.pipeline),
         dryRun: opts.dryRun ?? false,
+        settleWeeks: parseInt(opts.settle),
       });
       console.log(JSON.stringify(result, null, 2));
     } catch (err) {

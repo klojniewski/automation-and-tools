@@ -53,6 +53,21 @@ export async function findRowByWeek(weekLabel: string): Promise<number | null> {
   return idx === -1 ? null : idx + 1;
 }
 
+/** Read a single cell (e.g. "AD41") from the configured tab; null when empty. */
+export async function readCell(cell: string): Promise<string | null> {
+  const sheets = await getSheetsClient();
+  const env = getEnv();
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: env.GOOGLE_SHEETS_ID,
+    range: `${env.GOOGLE_SHEETS_TAB}!${cell}`,
+    valueRenderOption: "UNFORMATTED_VALUE",
+  });
+
+  const value = res.data.values?.[0]?.[0];
+  return value === undefined || value === "" ? null : String(value);
+}
+
 /**
  * Write specific cells in a given row using the column mapping.
  * Only touches the columns defined in the map — other cells in the row are untouched.

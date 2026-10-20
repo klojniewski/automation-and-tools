@@ -8,6 +8,8 @@ export const updateScorecardTask = schemaTask({
     week: z.string().optional(),
     pipeline: z.number().default(22),
     dryRun: z.boolean().default(false),
+    /** Weeks before `week` whose YouTube views are re-fetched (late-arriving data). */
+    settleWeeks: z.number().int().min(0).max(8).default(3),
   }),
   machine: "micro",
   maxDuration: 120,
