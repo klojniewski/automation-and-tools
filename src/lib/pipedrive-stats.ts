@@ -9,6 +9,7 @@ import {
   CHANNEL_LABELS,
 } from "./marketing-config.js";
 import { resolveWeek, weekLabel } from "./week.js";
+import { computeSqlGenValue, type SqlValueDeal } from "./sql-value.js";
 import type { DealItem } from "pipedrive/v2";
 
 const DEFAULT_PIPELINE = 22;
@@ -50,6 +51,10 @@ export interface PipedriveDealsResult {
   dealsCreated: number;
   totalMql: number;
   totalSql: number;
+  /** PLN value of the SQL deals created in the week; null when a rate could not be fetched. */
+  sqlGenValue: number | null;
+  sqlGenValueDeals: SqlValueDeal[];
+  warnings: string[];
   channels: Record<string, ChannelStats>;
   deals: Array<{
     title: string;
@@ -70,6 +75,7 @@ export async function getPipedriveDeals(options: {
   const rawDeals = await fetchDealsInRange(pipelineId, startDate, endDate, [MQL_FIELD_KEY, SQL_FIELD_KEY]);
   const { channels, totalMql, totalSql } = aggregateDeals(rawDeals);
   const label = weekLabel(weekNum);
+  const sqlValue = await computeSqlGenValue(rawDeals.filter(isSql));
 
   const deals = rawDeals.map((deal) => {
     const ch = deal.channel;
@@ -91,6 +97,9 @@ export async function getPipedriveDeals(options: {
     dealsCreated: rawDeals.length,
     totalMql,
     totalSql,
+    sqlGenValue: sqlValue.totalPln,
+    sqlGenValueDeals: sqlValue.deals,
+    warnings: sqlValue.warnings,
     channels,
     deals,
   };
@@ -105,6 +114,9 @@ export async function getPipedriveDeals(options: {
     mql: totalMql,
     sql: totalSql,
   };
+  // Left out when a rate is missing, so the cell keeps its previous value.
+  if (sqlValue.totalPln !== null) data.sqlGenValue = sqlValue.totalPln;
+  for (const w of sqlValue.warnings) console.warn(`[pipedrive-deals] ${w}`);
   for (const rawKey of Object.keys(CHANNEL_LABELS)) {
     const chLabel = CHANNEL_LABELS[rawKey];
     const c = channels[chLabel] ?? { all: 0, mql: 0, sql: 0 };

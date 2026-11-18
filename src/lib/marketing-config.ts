@@ -101,6 +101,7 @@ export const DEALS_COLUMN_MAP: Record<string, string> = {
   dealsCreated:      "AQ",
   mql:               "AR",
   sql:               "AS",
+  sqlGenValue:       "AT",//SQL Gen Value NB (PLN)
   channel_390_mql:   "AE",//Website / Organic
   channel_390_sql:   "AF",//Website / Organic
   channel_389_mql:   "AI",//Referral / Network
@@ -164,6 +165,7 @@ export const SCORECARD_COLUMN_MAP: Record<string, string> = {
   dealsCreated:             "AQ",
   mql:                      "AR",
   sql:                      "AS",
+  sqlGenValue:              "AT", // SQL Gen Value NB (PLN)
 };
 
 /** Metric labels in the order they appear in the Google Sheet columns. */

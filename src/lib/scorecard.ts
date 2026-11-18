@@ -13,6 +13,7 @@ import {
   CHANNEL_LABELS,
 } from "./marketing-config.js";
 import { deriveWeekNum, resolveWeek, weekLabel } from "./week.js";
+import { computeSqlGenValue, type SqlValueDeal } from "./sql-value.js";
 import type { DealItem } from "pipedrive/v2";
 
 const DEFAULT_PIPELINE = 22;
@@ -105,6 +106,9 @@ export interface ScorecardResult {
   written: boolean;
   ga4: GA4Metrics;
   deals: { total: number; mql: number; sql: number };
+  /** PLN value of the SQL deals created in the week; null when a rate could not be fetched. */
+  sqlGenValue: number | null;
+  sqlGenValueDeals: SqlValueDeal[];
   channels: Record<string, ChannelStats>;
   youtubeViews: number;
   /** Days of YouTube data the API had for the target week (7 = complete). */
@@ -199,6 +203,8 @@ export async function updateScorecard(options: {
 
   const { channels, totalMql, totalSql } = aggregateDeals(deals);
   const label = weekLabel(weekNum);
+  const sqlValue = await computeSqlGenValue(deals.filter(isSql));
+  warnings.push(...sqlValue.warnings);
 
   const base: ScorecardResult = {
     weekLabel: label,
@@ -208,6 +214,8 @@ export async function updateScorecard(options: {
     written: false,
     ga4: metrics,
     deals: { total: deals.length, mql: totalMql, sql: totalSql },
+    sqlGenValue: sqlValue.totalPln,
+    sqlGenValueDeals: sqlValue.deals,
     channels,
     youtubeViews,
     youtubeDays: yt.days,
@@ -227,6 +235,8 @@ export async function updateScorecard(options: {
   const allData: Record<string, string | number> = {
     ...ga4ToRecord(metrics),
     ...dealsToRecord(deals, channels, totalMql, totalSql),
+    // Left out when a rate is missing, so the cell keeps its previous value.
+    ...(sqlValue.totalPln !== null ? { sqlGenValue: sqlValue.totalPln } : {}),
     youtubeViews,
     // gscClicks is written only once its column mapping exists in SCORECARD_COLUMN_MAP
     // (updateMappedCells silently skips keys with no mapped column)
